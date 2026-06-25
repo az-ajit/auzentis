@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auzentis — Intelligent Technology. Built For The Future.</title>
+<meta name="description" content="Auzentis delivers premium digital solutions, AI automation, enterprise systems, and scalable business infrastructure for modern organizations.">
+<link rel="icon" type="image/png" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-0:#00040c;
+    --bg-1:#000613;
+    --bg-2:#000a1a;
+    --bg-3:#02091c;
+    --card:#04123180;
+    --card-solid:#071534;
+    --border-soft:rgba(70,100,170,0.22);
+    --border-strong:rgba(110,150,255,0.3);
+    --blue:#0747eb;
+    --blue-bright:#2d6bff;
+    --blue-light:#5b8dff;
+    --white:#f5f7fb;
+    --grey:#aab4c8;
+    --grey-dim:#7f8baa;
+    --radius:14px;
+    --maxw:1280px;
+    --font-display:'Manrope', 'Inter', sans-serif;
+    --font-body:'Inter', sans-serif;
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box;}
+
+  html{scroll-behavior:smooth;}
+
+  body{
+    background:var(--bg-1);
+    color:var(--white);
+    font-family:var(--font-body);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+
+  a{color:inherit;text-decoration:none;}
+  ul{list-style:none;}
+  button{font-family:inherit;cursor:pointer;}
+
+  img{max-width:100%;display:block;}
+
+  .wrap{
+    max-width:var(--maxw);
+    margin:0 auto;
+    padding:0 32px;
+  }
+
+  :focus-visible{
+    outline:2px solid var(--blue-light);
+    outline-offset:3px;
+    border-radius:4px;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:15px;
+    padding:13px 22px;
+    border-radius:8px;
+    border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
+    white-space:nowrap;
+  }
+  .btn svg{transition:transform .2s ease;}
+  .btn:hover svg{transform:translateX(3px);}
+  .btn-primary{
+    background:var(--blue);
+    color:#fff;
+    box-shadow:0 0 0 0 rgba(7,71,235,0.5);
+  }
+  .btn-primary:hover{
+    background:var(--blue-bright);
+    box-shadow:0 6px 24px -4px rgba(13,90,255,0.55);
+    transform:translateY(-1px);
+  }
+  .btn-outline{
+    background:transparent;
+    border:1px solid rgba(255,255,255,0.28);
+    color:#fff;
+  }
+  .btn-outline:hover{
+    border-color:rgba(255,255,255,0.6);
+    background:rgba(255,255,255,0.04);
+    transform:translateY(-1px);
+  }
+  .btn-sm{padding:11px 18px;font-size:14px;}
+
+  /* ---------- Header ---------- */
+  header{
+    position:sticky;
+    top:0;
+    z-index:200;
+    background:rgba(0,4,12,0.78);
+    backdrop-filter:blur(14px) saturate(140%);
+    -webkit-backdrop-filter:blur(14px) saturate(140%);
+    border-bottom:1px solid rgba(255,255,255,0.06);
+  }
+  .nav-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    height:78px;
+    gap:24px;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:20px;
+    letter-spacing:0.5px;
+    flex-shrink:0;
+  }
+  .brand img{height:30px;width:auto;}
+
+  nav.primary-nav{flex:1;}
+  nav.primary-nav ul{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:36px;
+  }
+  nav.primary-nav a{
+    font-size:15px;
+    font-weight:500;
+    color:var(--grey);
+    position:relative;
+    padding:6px 0;
+    transition:color .15s ease;
+  }
+  nav.primary-nav a:hover{color:#fff;}
+  nav.primary-nav a.active{color:#fff;}
+  nav.primary-nav a.active::after{
+    content:'';
+    position:absolute;
+    left:0; right:0; bottom:-2px;
+    height:2px;
+    background:var(--blue-bright);
+    border-radius:2px;
+  }
+
+  .header-cta{flex-shrink:0;}
+  .header-cta .btn{display:none;}
+  @media (min-width:880px){
+    .header-cta .btn{display:inline-flex;}
+  }
+
+  .mobile-toggle{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:5px;
+    width:34px;
+    height:34px;
+    background:none;
+    border:none;
+  }
+  .mobile-toggle span{
+    display:block;
+    height:2px;
+    width:100%;
+    background:#fff;
+    border-radius:2px;
+    transition:transform .25s ease, opacity .25s ease;
+  }
+  .mobile-toggle.open span:nth-child(1){transform:translateY(7px) rotate(45deg);}
+  .mobile-toggle.open span:nth-child(2){opacity:0;}
+  .mobile-toggle.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg);}
+
+  .mobile-menu{
+    position:fixed;
+    top:78px;
+    left:0; right:0;
+    background:#00040c;
+    border-bottom:1px solid rgba(255,255,255,0.08);
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .35s ease;
+    z-index:199;
+  }
+  .mobile-menu.open{max-height:calc(100vh - 78px);overflow-y:auto;}
+  .mobile-menu ul{
+    display:flex;
+    flex-direction:column;
+    padding:8px 32px 28px;
+  }
+  .mobile-menu a{
+    display:block;
+    padding:14px 0;
+    font-size:17px;
+    font-weight:600;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+    color:#fff;
+  }
+  .mobile-menu .btn{margin-top:18px;width:100%;justify-content:center;}
+
+  @media (min-width:880px){
+    .mobile-toggle{display:none;}
+    .mobile-menu{display:none;}
+  }
+  @media (max-width:879px){
+    nav.primary-nav{display:none;}
+  }
+
+  /* ---------- Hero ---------- */
+  .hero{
+    position:relative;
+    background:radial-gradient(ellipse 90% 70% at 75% 35%, rgba(7,40,110,0.35), transparent 60%), var(--bg-1);
+    padding:72px 0 88px;
+    overflow:hidden;
+  }
+  .hero-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:48px;
+    align-items:center;
+  }
+  @media (min-width:960px){
+    .hero-grid{grid-template-columns:1.05fr 1fr;gap:40px;}
+  }
+  .eyebrow{
+    font-family:var(--font-display);
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:1.6px;
+    color:var(--blue-light);
+    text-transform:uppercase;
+    margin-bottom:18px;
+  }
+  .hero h1{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:clamp(38px, 6vw, 58px);
+    line-height:1.06;
+    letter-spacing:-1px;
+    text-transform:uppercase;
+  }
+  .hero h1 .accent{color:var(--blue-bright);}
+  .hero p.lead{
+    margin-top:22px;
+    font-size:17px;
+    line-height:1.7;
+    color:var(--grey);
+    max-width:480px;
+  }
+  .hero-actions{
+    display:flex;
+    gap:14px;
+    margin-top:34px;
+    flex-wrap:wrap;
+  }
+  .hero-visual{
+    position:relative;
+    aspect-ratio:1/1;
+    width:100%;
+    max-width:560px;
+    margin:0 auto;
+  }
+  .hero-visual canvas{
+    width:100%;
+    height:100%;
+    display:block;
+  }
+  .hero-logo-mark{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    width:38%;
+    max-width:220px;
+    filter:drop-shadow(0 0 40px rgba(45,107,255,0.55)) drop-shadow(0 0 90px rgba(7,71,235,0.35));
+    pointer-events:none;
+    z-index:2;
+    animation:logoFloat 6s ease-in-out infinite;
+  }
+  @keyframes logoFloat{
+    0%,100%{transform:translate(-50%,-50%) translateY(0);}
+    50%{transform:translate(-50%,-50%) translateY(-10px);}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .hero-logo-mark{animation:none;}
+  }
+
+  /* ---------- Stats / Trusted ---------- */
+  .section{
+    padding:64px 0;
+    border-top:1px solid rgba(255,255,255,0.06);
+  }
+  .section-tight{padding:56px 0;}
+
+  .trusted-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:36px;
+    align-items:center;
+  }
+  @media (min-width:760px){
+    .trusted-grid{grid-template-columns:1fr 1.4fr;}
+  }
+  .trusted-copy h2{
+    font-family:var(--font-display);
+    font-size:clamp(24px,3.4vw,30px);
+    font-weight:800;
+    margin-top:6px;
+  }
+  .trusted-copy p{
+    margin-top:12px;
+    color:var(--grey);
+    font-size:15.5px;
+    line-height:1.7;
+    max-width:420px;
+  }
+  .stats-row{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:28px 20px;
+  }
+  @media (min-width:560px){
+    .stats-row{grid-template-columns:repeat(4,1fr);}
+  }
+  .stat-icon{
+    color:var(--blue-light);
+    margin-bottom:14px;
+  }
+  .stat-num{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:clamp(26px,3.4vw,32px);
+    color:var(--blue-light);
+  }
+  .stat-label{
+    font-weight:600;
+    font-size:15px;
+    margin-top:4px;
+  }
+  .stat-sub{
+    color:var(--grey-dim);
+    font-size:13.5px;
+    margin-top:3px;
+  }
+
+  /* ---------- Services ---------- */
+  .section-head{margin-bottom:36px;}
+  .section-head h2{
+    font-family:var(--font-display);
+    font-size:clamp(26px,3.6vw,32px);
+    font-weight:800;
+    margin-top:6px;
+  }
+  .services-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:18px;
+  }
+  @media (min-width:620px){
+    .services-grid{grid-template-columns:repeat(2,1fr);}
+  }
+  @media (min-width:960px){
+    .services-grid{grid-template-columns:repeat(3,1fr);}
+  }
+  @media (min-width:1180px){
+    .services-grid{grid-template-columns:repeat(6,1fr);}
+  }
+  .card{
+    background:linear-gradient(180deg, rgba(10,28,68,0.55), rgba(4,12,32,0.4));
+    border:1px solid var(--border-soft);
+    border-radius:var(--radius);
+    padding:26px 22px;
+    transition:border-color .2s ease, transform .2s ease, background .2s ease;
+  }
+  .card:hover{
+    border-color:var(--border-strong);
+    transform:translateY(-3px);
+    background:linear-gradient(180deg, rgba(14,36,86,0.6), rgba(4,12,32,0.45));
+  }
+  .card-icon{
+    color:var(--blue-light);
+    margin-bottom:18px;
+  }
+  .card h3{
+    font-family:var(--font-display);
+    font-size:17px;
+    font-weight:700;
+    line-height:1.3;
+  }
+  .card p{
+    margin-top:10px;
+    color:var(--grey);
+    font-size:14px;
+    line-height:1.6;
+  }
+  .card-arrow{
+    margin-top:18px;
+    color:var(--blue-light);
+  }
+
+  /* ---------- Why Auzentis ---------- */
+  .why-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:32px;
+    align-items:start;
+  }
+  @media (min-width:900px){
+    .why-grid{grid-template-columns:1fr 1fr;}
+  }
+  .why-heading{
+    font-family:var(--font-display);
+    font-size:clamp(28px,4.2vw,38px);
+    font-weight:800;
+    line-height:1.15;
+    text-transform:uppercase;
+  }
+  .why-heading .accent{color:var(--blue-bright);}
+  .why-text{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:24px;
+    align-items:start;
+  }
+  @media (min-width:560px){
+    .why-text{grid-template-columns:1.15fr 1fr;}
+  }
+  .why-text p{
+    color:var(--grey);
+    font-size:16px;
+    line-height:1.75;
+    max-width:460px;
+  }
+  .learn-more{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    color:var(--blue-light);
+    font-weight:700;
+    font-size:15px;
+  }
+  .learn-more svg{transition:transform .2s ease;}
+  .learn-more:hover svg{transform:translateX(4px);}
+  .why-copy{
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+  }
+  .ring-visual{
+    aspect-ratio:1/1;
+    width:100%;
+    max-width:240px;
+    margin:0 auto;
+  }
+  @media (min-width:560px){
+    .ring-visual{margin:0 0 0 auto;}
+  }
+
+  /* ---------- Industries ---------- */
+  .industries-grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:14px;
+  }
+  @media (min-width:600px){
+    .industries-grid{grid-template-columns:repeat(4,1fr);}
+  }
+  @media (min-width:1000px){
+    .industries-grid{grid-template-columns:repeat(8,1fr);}
+  }
+  .industry-card{
+    background:rgba(8,22,54,0.45);
+    border:1px solid var(--border-soft);
+    border-radius:12px;
+    padding:22px 12px;
+    text-align:center;
+    transition:border-color .2s ease, transform .2s ease;
+  }
+  .industry-card:hover{
+    border-color:var(--border-strong);
+    transform:translateY(-2px);
+  }
+  .industry-card svg{color:var(--blue-light);margin-bottom:12px;}
+  .industry-card span{font-size:14px;font-weight:600;}
+
+  /* ---------- About / Careers split ---------- */
+  .split-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:1px;
+    background:rgba(255,255,255,0.06);
+  }
+  @media (min-width:880px){
+    .split-grid{grid-template-columns:1fr 1fr;}
+  }
+  .split-panel{
+    background:var(--bg-1);
+    padding:48px 32px;
+    display:flex;
+    flex-direction:column;
+  }
+  @media (min-width:880px){
+    .split-panel{padding:56px 48px;}
+  }
+  .split-panel .eyebrow{margin-bottom:14px;}
+  .split-panel h2{
+    font-family:var(--font-display);
+    font-size:clamp(24px,3.2vw,30px);
+    font-weight:800;
+    line-height:1.2;
+    margin-bottom:16px;
+  }
+  .split-panel p{
+    color:var(--grey);
+    font-size:15.5px;
+    line-height:1.75;
+    max-width:460px;
+    margin-bottom:24px;
+  }
+  .split-visual{
+    margin:28px 0;
+    border-radius:12px;
+    overflow:hidden;
+    height:230px;
+    background:linear-gradient(135deg, rgba(8,22,60,0.7), rgba(3,8,22,0.9));
+    border:1px solid var(--border-soft);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
+  }
+  .careers-cta{
+    margin-top:auto;
+    align-self:flex-start;
+  }
+  .careers-photo{
+    width:100%;height:100%;object-fit:cover;
+  }
+
+  /* ---------- Contact ---------- */
+  .contact-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:40px;
+  }
+  @media (min-width:960px){
+    .contact-grid{grid-template-columns:0.85fr 1.15fr;}
+  }
+  .contact-info h2{
+    font-family:var(--font-display);
+    font-size:clamp(26px,3.6vw,32px);
+    font-weight:800;
+    margin-top:6px;
+    margin-bottom:24px;
+  }
+  .contact-line{
+    display:flex;
+    align-items:flex-start;
+    gap:14px;
+    margin-bottom:18px;
+    font-size:15px;
+    color:var(--grey);
+  }
+  .contact-line svg{color:var(--blue-light);flex-shrink:0;margin-top:2px;}
+  .contact-line a{color:var(--grey);transition:color .15s ease;}
+  .contact-line a:hover{color:#fff;}
+  .whatsapp-btn{
+    margin-top:10px;
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    border:1px solid rgba(60,200,120,0.4);
+    color:#5fe39a;
+    padding:11px 18px;
+    border-radius:8px;
+    font-weight:700;
+    font-size:14px;
+    background:rgba(40,180,100,0.06);
+    transition:background .2s ease, border-color .2s ease;
+  }
+  .whatsapp-btn:hover{
+    background:rgba(40,180,100,0.14);
+    border-color:rgba(60,200,120,0.7);
+  }
+
+  .form-card{
+    background:rgba(6,16,40,0.55);
+    border:1px solid var(--border-soft);
+    border-radius:var(--radius);
+    padding:28px;
+  }
+  .form-row{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:14px;
+    margin-bottom:14px;
+  }
+  @media (min-width:540px){
+    .form-row.two{grid-template-columns:1fr 1fr;}
+  }
+  .field input,
+  .field textarea{
+    width:100%;
+    background:rgba(255,255,255,0.03);
+    border:1px solid rgba(255,255,255,0.14);
+    border-radius:8px;
+    padding:13px 16px;
+    color:#fff;
+    font-family:inherit;
+    font-size:14.5px;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .field input::placeholder,
+  .field textarea::placeholder{color:var(--grey-dim);}
+  .field input:focus,
+  .field textarea:focus{
+    border-color:var(--blue-light);
+    background:rgba(255,255,255,0.05);
+    outline:none;
+  }
+  .field textarea{resize:vertical;min-height:110px;}
+  .form-card .btn{width:100%;justify-content:center;margin-top:4px;}
+  .form-status{
+    margin-top:14px;
+    font-size:14px;
+    min-height:20px;
+    color:#5fe39a;
+  }
+  .form-status.error{color:#ff8585;}
+
+  /* ---------- Footer ---------- */
+  footer{
+    border-top:1px solid rgba(255,255,255,0.06);
+    background:var(--bg-0);
+    padding:56px 0 28px;
+  }
+  .footer-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:36px;
+  }
+  @media (min-width:760px){
+    .footer-grid{grid-template-columns:1.4fr 1fr 1fr 1fr;}
+  }
+  .footer-brand .brand{margin-bottom:14px;}
+  .footer-brand p{
+    color:var(--grey-dim);
+    font-size:14px;
+    line-height:1.6;
+    max-width:260px;
+  }
+  .footer-col h4{
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:0.6px;
+    text-transform:uppercase;
+    color:var(--grey);
+    margin-bottom:16px;
+  }
+  .footer-col ul{display:flex;flex-direction:column;gap:11px;}
+  .footer-col a{
+    color:var(--grey-dim);
+    font-size:14.5px;
+    transition:color .15s ease;
+  }
+  .footer-col a:hover{color:#fff;}
+  .social-row{display:flex;gap:10px;margin-top:6px;}
+  .social-row a{
+    width:36px;height:36px;
+    display:flex;align-items:center;justify-content:center;
+    border:1px solid rgba(255,255,255,0.14);
+    border-radius:8px;
+    color:var(--grey);
+    transition:border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .social-row a:hover{
+    border-color:rgba(255,255,255,0.4);
+    color:#fff;
+    background:rgba(255,255,255,0.04);
+  }
+  .footer-bottom{
+    margin-top:48px;
+    padding-top:24px;
+    border-top:1px solid rgba(255,255,255,0.06);
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    align-items:center;
+    text-align:center;
+  }
+  @media (min-width:700px){
+    .footer-bottom{flex-direction:row;justify-content:space-between;text-align:left;}
+  }
+  .footer-bottom p{color:var(--grey-dim);font-size:13px;}
+  .footer-bottom .legal-links{display:flex;gap:22px;}
+  .footer-bottom .legal-links a{color:var(--grey-dim);font-size:13px;}
+  .footer-bottom .legal-links a:hover{color:#fff;}
+
+  /* ---------- Reveal animation ---------- */
+  .reveal{
+    opacity:0;
+    transform:translateY(18px);
+    transition:opacity .6s ease, transform .6s ease;
+  }
+  .reveal.in{opacity:1;transform:translateY(0);}
+
+  @media (prefers-reduced-motion: reduce){
+    .reveal{opacity:1;transform:none;transition:none;}
+    html{scroll-behavior:auto;}
+  }
+
+  /* ---------- Ring animation ---------- */
+  .spin-slow{animation:spin 14s linear infinite;}
+  .spin-rev{animation:spinRev 18s linear infinite;}
+  .spin-mid{animation:spin 24s linear infinite;}
+  @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+  @keyframes spinRev{from{transform:rotate(360deg);}to{transform:rotate(0deg);}}
+  @media (prefers-reduced-motion: reduce){
+    .spin-slow,.spin-rev,.spin-mid{animation:none;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav-row">
+    <a href="#home" class="brand">
+      <img src="assets/icon_trimmed.png" alt="Auzentis logo">
+      AUZENTIS
+    </a>
+    <nav class="primary-nav" aria-label="Primary">
+      <ul>
+        <li><a href="#home" class="active">Home</a></li>
+        <li><a href="#services">Services</a></li>
+        <li><a href="#industries">Industries</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a href="#careers">Careers</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+    </nav>
+    <div class="header-cta">
+      <a href="#contact" class="btn btn-primary">Get in Touch
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+    <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="mobile-menu" id="mobileMenu">
+    <ul>
+      <li><a href="#home">Home</a></li>
+      <li><a href="#services">Services</a></li>
+      <li><a href="#industries">Industries</a></li>
+      <li><a href="#about">About</a></li>
+      <li><a href="#careers">Careers</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+    <div class="wrap" style="padding:0 32px;">
+      <a href="#contact" class="btn btn-primary">Get in Touch
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section class="hero" id="home">
+    <div class="wrap hero-grid">
+      <div>
+        <p class="eyebrow">AI &middot; AUTOMATION &middot; CLOUD &middot; INNOVATION</p>
+        <h1>INTELLIGENT<br><span class="accent">TECHNOLOGY.</span><br>BUILT FOR<br>THE FUTURE.</h1>
+        <p class="lead">Auzentis delivers premium digital solutions, AI automation, enterprise systems, and scalable business infrastructure for modern organizations.</p>
+        <div class="hero-actions">
+          <a href="#services" class="btn btn-primary">Explore Services
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <a href="#contact" class="btn btn-outline">Contact Us
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <canvas id="networkCanvas" aria-hidden="true"></canvas>
+        <img class="hero-logo-mark" src="assets/logo_hero_trimmed.png" alt="Auzentis logo mark">
+      </div>
+    </div>
+  </section>
+
+  <!-- TRUSTED / STATS -->
+  <section class="section" id="trusted">
+    <div class="wrap">
+      <div class="trusted-grid">
+        <div class="trusted-copy reveal">
+          <p class="eyebrow">TRUSTED BY BUSINESSES WORLDWIDE</p>
+          <h2>Trusted Technology Partner</h2>
+          <p>Helping businesses accelerate growth through innovation, automation, and intelligent digital transformation.</p>
+        </div>
+        <div class="stats-row">
+          <div class="reveal">
+            <div class="stat-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/></svg></div>
+            <div class="stat-num">120+</div>
+            <div class="stat-label">Projects</div>
+            <div class="stat-sub">Delivered successfully</div>
+          </div>
+          <div class="reveal">
+            <div class="stat-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21h18M5 21V7l6-4 6 4v14M9 9h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1"/></svg></div>
+            <div class="stat-num">12+</div>
+            <div class="stat-label">Industries</div>
+            <div class="stat-sub">Across the globe</div>
+          </div>
+          <div class="reveal">
+            <div class="stat-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 3 7l9 5 9-5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5"/></svg></div>
+            <div class="stat-num">45+</div>
+            <div class="stat-label">Solutions</div>
+            <div class="stat-sub">Enterprise grade</div>
+          </div>
+          <div class="reveal">
+            <div class="stat-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 6l-9.5 9.5-5-5L1 18"/><path d="M17 6h6v6"/></svg></div>
+            <div class="stat-num">300%</div>
+            <div class="stat-label">Growth Impact</div>
+            <div class="stat-sub">Average improvement</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICES -->
+  <section class="section" id="services">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">WHAT WE DO</p>
+        <h2>Our Services</h2>
+      </div>
+      <div class="services-grid">
+
+        <div class="card reveal">
+          <div class="card-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
+          <h3>Software Engineering</h3>
+          <p>Custom software solutions built for performance, scalability and growth.</p>
+          <div class="card-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 7 7 17M7 7h10v10"/></svg></div>
+        </div>
+
+        <div class="card reveal">
+          <div class="card-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2a3.5 3.5 0 0 0-3.5 3.5v.5a3 3 0 0 0-2 5.5 3.5 3.5 0 0 0 1.5 6.5h1A3.5 3.5 0 0 0 10 21V5.5A3.5 3.5 0 0 0 9.5 2zM14.5 2A3.5 3.5 0 0 1 18 5.5v.5a3 3 0 0 1 2 5.5 3.5 3.5 0 0 1-1.5 6.5h-1a3.5 3.5 0 0 1-3.5-3.5V5.5A3.5 3.5 0 0 1 14.5 2z"/></svg></div>
+          <h3>AI &amp; Automation</h3>
+          <p>Intelligent automation solutions that optimize processes and boost ROI.</p>
+          <div class="card-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 7 7 17M7 7h10v10"/></svg></div>
+        </div>
+
+        <div class="card reveal">
+          <div class="card-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></div>
+          <h3>Cloud Infrastructure</h3>
+          <p>Secure, scalable and high-performance cloud infrastructure.</p>
+          <div class="card-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 7 7 17M7 7h10v10"/></svg></div>
+        </div>
+
+        <div class="card reveal">
+          <div class="card-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></div>
+          <h3>Web &amp; Mobile Applications</h3>
+          <p>Beautiful, fast and user-centric web and mobile experiences.</p>
+          <div class="card-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 7 7 17M7 7h10v10"/></svg></div>
+        </div>
+
+        <div class="card reveal">
+          <div class="card-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h-2v-5l2-5h9l4 5h1a2 2 0 0 1 2 2v3h-2"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg></div>
+          <h3>Automotive Solutions</h3>
+          <p>Smart mobility solutions driving the future of automotive technology.</p>
+          <div class="card-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 7 7 17M7 7h10v10"/></svg></div>
+        </div>
+
+        <div class="card reveal">
+          <div class="card-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg></div>
+          <h3>IT Consulting</h3>
+          <p>Strategic technology consulting to transform your business.</p>
+          <div class="card-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17 7 7 17M7 7h10v10"/></svg></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY AUZENTIS -->
+  <section class="section">
+    <div class="wrap">
+      <div class="why-grid">
+        <div class="reveal">
+          <p class="eyebrow">WHY AUZENTIS</p>
+          <h2 class="why-heading">PRECISION.<br><span class="accent">INNOVATION.</span><br>PERFORMANCE.</h2>
+        </div>
+        <div class="why-text reveal">
+          <div class="why-copy">
+            <p>Technology should not only solve problems. It should create exceptional experiences, accelerate growth, and redefine how businesses operate.</p>
+            <a href="#about" class="learn-more">Learn More
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </a>
+          </div>
+          <div class="ring-visual reveal" aria-hidden="true">
+            <svg viewBox="0 0 300 300" width="100%" height="100%">
+              <defs>
+                <radialGradient id="ringGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stop-color="#1a3a8c" stop-opacity="0.25"/>
+                  <stop offset="100%" stop-color="#000613" stop-opacity="0"/>
+                </radialGradient>
+                <linearGradient id="ringStroke1" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#1c3f99" stop-opacity="0.2"/>
+                  <stop offset="50%" stop-color="#5b8dff" stop-opacity="0.95"/>
+                  <stop offset="100%" stop-color="#1c3f99" stop-opacity="0.2"/>
+                </linearGradient>
+                <linearGradient id="ringStroke2" x1="100%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#1c3f99" stop-opacity="0"/>
+                  <stop offset="50%" stop-color="#2d6bff" stop-opacity="0.8"/>
+                  <stop offset="100%" stop-color="#1c3f99" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <circle cx="150" cy="150" r="140" fill="url(#ringGlow)"/>
+              <g class="spin-slow" style="transform-origin:150px 150px;">
+                <ellipse cx="150" cy="150" rx="110" ry="60" fill="none" stroke="url(#ringStroke1)" stroke-width="2.2"/>
+              </g>
+              <g class="spin-rev" style="transform-origin:150px 150px;">
+                <ellipse cx="150" cy="150" rx="60" ry="110" fill="none" stroke="url(#ringStroke2)" stroke-width="2.2"/>
+              </g>
+              <g class="spin-mid" style="transform-origin:150px 150px;">
+                <ellipse cx="150" cy="150" rx="95" ry="95" fill="none" stroke="rgba(91,141,255,0.3)" stroke-width="1"/>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INDUSTRIES -->
+  <section class="section" id="industries">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">INDUSTRIES WE SERVE</p>
+        <h2>Industries</h2>
+      </div>
+      <div class="industries-grid">
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21h18M5 21V10l7-6 7 6v11M9 21v-6h6v6"/></svg><span>Banking</span></div>
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 14c1.5-1.5 3-3.5 3-5.5A4.5 4.5 0 0 0 17.5 4 4.5 4.5 0 0 0 13 7.5 4.5 4.5 0 0 0 8.5 4 4.5 4.5 0 0 0 4 8.5C4 12 8 16 13 21c1-1 2-2 3-3"/></svg><span>Healthcare</span></div>
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg><span>Retail</span></div>
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 17h-2v-5l2-5h9l4 5h1a2 2 0 0 1 2 2v3h-2"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg><span>Automotive</span></div>
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21h18M6 21V8l5-4 5 4v13M10 21v-5h4v5M9 12h.01M9 9h.01M14 12h.01M14 9h.01"/></svg><span>Enterprise</span></div>
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9 2v3M12 2v3M15 2v3M9 19v3M12 19v3M15 19v3M2 9h3M2 12h3M2 15h3M19 9h3M19 12h3M19 15h3"/></svg><span>Technology</span></div>
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="1" y="7" width="15" height="10" rx="1"/><path d="M16 10h3l3 3v4h-6"/><circle cx="5.5" cy="19.5" r="1.5"/><circle cx="17.5" cy="19.5" r="1.5"/></svg><span>Logistics</span></div>
+        <div class="industry-card reveal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg><span>Startups</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ABOUT + CAREERS -->
+  <section class="split-grid">
+    <div class="split-panel" id="about">
+      <p class="eyebrow">ABOUT AUZENTIS</p>
+      <h2>Building Intelligent Digital Ecosystems</h2>
+      <div class="split-visual reveal" aria-hidden="true">
+        <svg width="46%" viewBox="0 0 200 200">
+          <defs>
+            <linearGradient id="cubeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#3a6dff" stop-opacity="0.9"/>
+              <stop offset="100%" stop-color="#0a1840" stop-opacity="0.9"/>
+            </linearGradient>
+          </defs>
+          <g stroke="#5b8dff" stroke-width="1.2" fill="url(#cubeGrad)" fill-opacity="0.5">
+            <polygon points="100,40 150,65 100,90 50,65"/>
+            <polygon points="50,65 100,90 100,140 50,115"/>
+            <polygon points="150,65 100,90 100,140 150,115"/>
+            <polygon points="100,100 140,120 100,140 60,120" fill="#5b8dff" fill-opacity="0.7"/>
+          </g>
+        </svg>
+      </div>
+      <p>Auzentis is a modern technology company focused on building intelligent digital ecosystems and scalable enterprise solutions. Our mission is to combine innovation, automation, engineering, and premium design to create future-ready digital experiences. We help organizations transform operations, accelerate growth, and lead confidently in the digital era.</p>
+    </div>
+    <div class="split-panel" id="careers">
+      <p class="eyebrow">CAREERS</p>
+      <h2>Build The Future With Us</h2>
+      <div class="split-visual reveal" aria-hidden="true">
+        <svg width="60%" viewBox="0 0 220 160">
+          <defs>
+            <linearGradient id="personGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#5b8dff"/>
+              <stop offset="100%" stop-color="#0747eb"/>
+            </linearGradient>
+          </defs>
+          <rect x="20" y="110" width="180" height="6" rx="3" fill="#5b8dff" fill-opacity="0.25"/>
+          <g fill="none" stroke="url(#personGrad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="70" cy="48" r="14"/>
+            <path d="M48 100c0-16 10-28 22-28s22 12 22 28"/>
+            <circle cx="150" cy="44" r="14"/>
+            <path d="M128 100c0-16 10-28 22-28s22 12 22 28"/>
+          </g>
+          <rect x="80" y="92" width="60" height="22" rx="3" fill="none" stroke="#5b8dff" stroke-width="2.4"/>
+          <line x1="80" y1="114" x2="140" y2="114" stroke="#5b8dff" stroke-width="2.4" stroke-linecap="round"/>
+          <circle cx="180" cy="84" r="3" fill="#5b8dff"/>
+          <circle cx="40" cy="70" r="2.4" fill="#5b8dff" fill-opacity="0.7"/>
+          <circle cx="190" cy="50" r="2" fill="#5b8dff" fill-opacity="0.5"/>
+        </svg>
+      </div>
+      <p>Join our growing team of innovators, engineers, designers, and problem-solvers. Let's build technology that shapes the future.</p>
+      <a href="#contact" class="btn btn-primary careers-cta">View Open Positions
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </section>
+
+  <!-- CONTACT -->
+  <section class="section" id="contact">
+    <div class="wrap">
+      <div class="contact-grid">
+        <div class="contact-info reveal">
+          <p class="eyebrow">CONTACT US</p>
+          <h2>Let's Build Something Exceptional</h2>
+
+          <div class="contact-line">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z" opacity="0"/><path d="M22 6 12 13 2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+            <div>
+              <a href="mailto:info@auzentis.com">info@auzentis.com</a><br>
+              <a href="mailto:ajit@auzentis.com">ajit@auzentis.com</a>
+            </div>
+          </div>
+
+          <div class="contact-line">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            <a href="tel:+919876543210">+91 98765 43210</a>
+          </div>
+
+          <div class="contact-line">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            <span>Gurugram, Haryana, India</span>
+          </div>
+
+          <a href="https://wa.me/919876543210" target="_blank" rel="noopener" class="whatsapp-btn">
+            <svg width="18" height="18" viewBox="0 0 32 32" fill="currentColor"><path d="M16.04 4C9.4 4 4 9.37 4 15.97c0 2.42.69 4.68 1.98 6.6L4.6 28l5.6-1.46a12.2 12.2 0 0 0 5.83 1.49h.01c6.64 0 12.04-5.37 12.04-11.97C28.08 9.36 22.68 4 16.04 4zm0 21.78h-.01a10.06 10.06 0 0 1-5.13-1.4l-.37-.22-3.83 1 1.02-3.73-.24-.39a9.92 9.92 0 0 1-1.53-5.31C5.95 10.5 10.46 6 16.04 6c2.68 0 5.2 1.05 7.09 2.94a9.9 9.9 0 0 1 2.94 7.04c0 5.5-4.51 9.8-10.03 9.8zm5.5-7.34c-.3-.15-1.78-.88-2.06-.98-.27-.1-.47-.15-.67.15-.2.3-.77.98-.94 1.18-.17.2-.35.22-.65.07-1.76-.88-2.91-1.57-4.07-3.56-.31-.53.31-.49.88-1.64.1-.2.05-.37-.05-.52-.1-.15-.66-1.6-.91-2.18-.24-.57-.49-.49-.67-.5-.17-.01-.37-.01-.57-.01-.2 0-.52.08-.79.38-.27.3-1.04 1.02-1.04 2.49 0 1.47 1.07 2.89 1.22 3.09.15.2 2.1 3.2 5.09 4.36 2.99 1.16 2.99.78 3.53.73.54-.05 1.78-.73 2.03-1.43.25-.7.25-1.3.17-1.43-.07-.13-.27-.2-.57-.35z"/></svg>
+            Chat on WhatsApp
+          </a>
+        </div>
+
+        <form class="form-card reveal" id="contactForm" novalidate>
+          <div class="form-row two">
+            <div class="field">
+              <input type="text" id="cf-name" name="name" placeholder="Your Name" required autocomplete="name">
+            </div>
+            <div class="field">
+              <input type="email" id="cf-email" name="email" placeholder="Your Email" required autocomplete="email">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <input type="text" id="cf-company" name="company" placeholder="Company" autocomplete="organization">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <textarea id="cf-message" name="message" placeholder="Your Message" required></textarea>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary">Send Message
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          </button>
+          <p class="form-status" id="formStatus" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="#home" class="brand"><img src="assets/icon_trimmed.png" alt="Auzentis logo">AUZENTIS</a>
+        <p>Intelligent technology solutions built for the future.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Quick Links</h4>
+        <ul>
+          <li><a href="#home">Home</a></li>
+          <li><a href="#services">Services</a></li>
+          <li><a href="#industries">Industries</a></li>
+          <li><a href="#about">About</a></li>
+          <li><a href="#careers">Careers</a></li>
+          <li><a href="#contact">Contact</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Services</h4>
+        <ul>
+          <li><a href="#services">Software Engineering</a></li>
+          <li><a href="#services">AI &amp; Automation</a></li>
+          <li><a href="#services">Cloud Infrastructure</a></li>
+          <li><a href="#services">Web &amp; Mobile Apps</a></li>
+          <li><a href="#services">Automotive Solutions</a></li>
+          <li><a href="#services">IT Consulting</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Connect With Us</h4>
+        <div class="social-row">
+          <a href="#" aria-label="LinkedIn"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M20.45 20.45h-3.55v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.12 2.06 2.06 0 0 1 0 4.12zM7.12 20.45H3.56V9h3.56v11.45z"/></svg></a>
+          <a href="#" aria-label="Instagram"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg></a>
+          <a href="#" aria-label="X (Twitter)"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M18.9 2H22l-7.4 8.46L23.3 22H16.6l-5.2-6.8-6 6.8H2.2l7.9-9.04L1.7 2h6.85l4.7 6.2L18.9 2z"/></svg></a>
+          <a href="#" aria-label="YouTube"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 8.5s-.2-1.6-.84-2.3c-.8-.9-1.7-.9-2.1-1C16 5 12 5 12 5h0s-4 0-7.06.2c-.4.1-1.3.1-2.1 1C2.2 6.9 2 8.5 2 8.5S1.8 10.4 1.8 12.3v1.8c0 1.9.2 3.8.2 3.8s.2 1.6.84 2.3c.8.9 1.85.87 2.32.97C6.8 21.4 12 21.4 12 21.4s4 0 7.06-.2c.4-.1 1.3-.1 2.1-1 .64-.7.84-2.3.84-2.3s.2-1.9.2-3.8v-1.8c0-1.9-.2-3.8-.2-3.8z"/><path d="M9.7 15.3V9.1l5.5 3.1z"/></svg></a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2025 Auzentis Pvt. Ltd. All Rights Reserved.</p>
+      <div class="legal-links">
+        <a href="#">Privacy Policy</a>
+        <a href="#">Terms of Service</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Mobile menu toggle
+  const toggle = document.getElementById('mobileToggle');
+  const menu = document.getElementById('mobileMenu');
+  toggle.addEventListener('click', () => {
+    const isOpen = menu.classList.toggle('open');
+    toggle.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', isOpen);
+  });
+  menu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+    menu.classList.remove('open');
+    toggle.classList.remove('open');
+    toggle.setAttribute('aria-expanded', 'false');
+  }));
+
+  // Active link highlight on scroll
+  const sections = ['home','services','industries','about','careers','contact'];
+  const navLinks = document.querySelectorAll('nav.primary-nav a');
+  const setActive = () => {
+    let current = 'home';
+    for (const id of sections) {
+      const el = document.getElementById(id);
+      if (el && el.getBoundingClientRect().top <= 120) current = id;
+    }
+    navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + current));
+  };
+  window.addEventListener('scroll', setActive, { passive: true });
+  setActive();
+
+  // Reveal on scroll
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const revealEls = document.querySelectorAll('.reveal');
+  if (!prefersReduced && 'IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold: 0.01, rootMargin: '0px 0px -40px 0px' });
+    revealEls.forEach(el => io.observe(el));
+    // Safety net: ensure nothing stays permanently hidden if observer misses it
+    setTimeout(() => revealEls.forEach(el => el.classList.add('in')), 2500);
+  } else {
+    revealEls.forEach(el => el.classList.add('in'));
+  }
+
+  // Contact form (client-side only demo handling)
+  const form = document.getElementById('contactForm');
+  const status = document.getElementById('formStatus');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = document.getElementById('cf-name').value.trim();
+    const email = document.getElementById('cf-email').value.trim();
+    const message = document.getElementById('cf-message').value.trim();
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!name || !emailOk || !message) {
+      status.textContent = 'Please fill in your name, a valid email, and a message.';
+      status.classList.add('error');
+      return;
+    }
+    status.classList.remove('error');
+    status.textContent = 'Thanks — your message has been sent. We will be in touch shortly.';
+    form.reset();
+  });
+
+  // Particle network hero animation (canvas)
+  (function () {
+    const canvas = document.getElementById('networkCanvas');
+    const ctx = canvas.getContext('2d');
+    let w, h, dpr;
+    let nodes = [];
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function resize() {
+      const rect = canvas.parentElement.getBoundingClientRect();
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = rect.width;
+      h = rect.height;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      initNodes();
+    }
+
+    function initNodes() {
+      const count = Math.max(28, Math.round((w * h) / 16000));
+      nodes = Array.from({ length: count }, () => ({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.85,
+        vy: (Math.random() - 0.5) * 0.85,
+        r: Math.random() * 1.6 + 0.6,
+        glow: Math.random() < 0.12
+      }));
+    }
+
+    function step() {
+      ctx.clearRect(0, 0, w, h);
+      const maxDist = Math.min(w, h) * 0.22;
+
+      for (let n of nodes) {
+        if (!reduced) {
+          n.x += n.vx;
+          n.y += n.vy;
+          if (n.x < 0 || n.x > w) n.vx *= -1;
+          if (n.y < 0 || n.y > h) n.vy *= -1;
+        }
+      }
+
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < maxDist) {
+            const alpha = (1 - dist / maxDist) * 0.5;
+            ctx.strokeStyle = `rgba(91,141,255,${alpha})`;
+            ctx.lineWidth = 0.6;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      for (let n of nodes) {
+        if (n.glow) {
+          const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, 14);
+          grad.addColorStop(0, 'rgba(120,170,255,0.9)');
+          grad.addColorStop(1, 'rgba(120,170,255,0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, 14, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = n.glow ? '#bcd2ff' : 'rgba(160,190,255,0.85)';
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (!reduced) requestAnimationFrame(step);
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+    step();
+  })();
+</script>
+
+</body>
+</html>
