@@ -8,6 +8,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800;900&family=Lato:wght@400;500;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
@@ -163,6 +166,7 @@
   .acc-mid{color:var(--yellow);}
   .acc-low{color:var(--red);}
   .acc-na{color:var(--text-dim);font-style:italic;}
+  .pct-inline{color:var(--text-dim);font-size:0.82em;margin-left:4px;font-weight:400;}
 
   .progress-track{width:100%;min-width:90px;height:9px;border-radius:6px;background:rgba(255,255,255,0.06);overflow:hidden;border:1px solid rgba(255,255,255,0.05);}
   .progress-fill{height:100%;border-radius:6px;width:0%;position:relative;transition:width 1.1s cubic-bezier(.4,0,.2,1);}
@@ -303,6 +307,7 @@
       </div>
     </div>
     <div class="header-right">
+      <button class="edit-btn" id="reportsBtn">📊 Reports</button>
       <button class="edit-btn" id="editBtn">✎ Edit Data</button>
       <button class="edit-btn" id="settingsBtn">⚙ Settings</button>
       <div class="live-pill"><span class="live-dot"></span>LIVE · AUTO-REFRESH 30S</div>
@@ -468,6 +473,42 @@
     <div class="modal-actions">
       <button class="btn btn-cancel" id="settingsCancelBtn">Cancel</button>
       <button class="btn btn-save" id="settingsSaveBtn">Save & Reload</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= REPORTS MODAL ================= -->
+<div class="modal-overlay" id="reportsOverlay">
+  <div class="modal" style="max-width:920px;">
+    <h2>Reports</h2>
+    <p class="hint">Pick a range (or use a quick preset) to pull forms completed, accuracy, and incentives for that period, then export as CSV, Excel, or PDF.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <button type="button" class="btn btn-cancel" id="presetTodayBtn" style="padding:7px 14px;font-size:11px;">Today</button>
+      <button type="button" class="btn btn-cancel" id="presetWeekBtn" style="padding:7px 14px;font-size:11px;">This Week</button>
+      <button type="button" class="btn btn-cancel" id="presetMonthBtn" style="padding:7px 14px;font-size:11px;">This Month</button>
+      <button type="button" class="btn btn-cancel" id="presetYearBtn" style="padding:7px 14px;font-size:11px;">This Year</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+      <label style="font-size:12px;color:var(--text-mid);font-family:'Montserrat',sans-serif;font-weight:700;">From:</label>
+      <input type="date" id="reportStartInput" style="background:rgba(255,255,255,0.04);border:1px solid rgba(94,199,255,0.25);border-radius:8px;color:var(--text-hi);font-family:'JetBrains Mono',monospace;font-size:13px;padding:7px 10px;">
+      <label style="font-size:12px;color:var(--text-mid);font-family:'Montserrat',sans-serif;font-weight:700;">To:</label>
+      <input type="date" id="reportEndInput" style="background:rgba(255,255,255,0.04);border:1px solid rgba(94,199,255,0.25);border-radius:8px;color:var(--text-hi);font-family:'JetBrains Mono',monospace;font-size:13px;padding:7px 10px;">
+      <button class="btn btn-save" id="generateReportBtn">Generate Report</button>
+    </div>
+    <div id="reportSummary" style="font-size:12px;color:var(--text-mid);margin-bottom:10px;"></div>
+    <div class="edit-table-wrap" id="reportTableWrap" style="display:none;">
+      <table class="edit-grid">
+        <thead>
+          <tr><th>Employee</th><th>Forms Completed</th><th>% of Personal Target</th><th>Accuracy</th><th>Incentive Earned</th></tr>
+        </thead>
+        <tbody id="reportBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" id="exportCsvBtn" disabled>Export CSV</button>
+      <button class="btn btn-cancel" id="exportExcelBtn" disabled>Export Excel</button>
+      <button class="btn btn-cancel" id="exportPdfBtn" disabled>Export PDF</button>
+      <button class="btn btn-cancel" id="reportsCloseBtn">Close</button>
     </div>
   </div>
 </div>
@@ -769,11 +810,14 @@ function render(){
   const bestLastDay = data.reduce((a,b)=> b.lastDay > a.lastDay ? b : a);
   const bestAccuracyEmp = withAccuracy.length ? withAccuracy.reduce((a,b)=> b.accuracy > a.accuracy ? b : a) : null;
 
+  const pctCompleted = TEAM_TARGET > 0 ? (totalCompleted / TEAM_TARGET * 100) : 0;
+  const pctRemaining = TEAM_TARGET > 0 ? (totalRemaining / TEAM_TARGET * 100) : 0;
+
   const kpis = [
     {label:'Total Employees', value: totalEmployees, sub:'Active headcount', cls:''},
     {label:'Forms Yesterday', value: totalLastDay.toLocaleString('en-IN'), sub:'Across all employees', cls:'accent'},
-    {label:'Forms Completed', value: totalCompleted.toLocaleString('en-IN'), sub:`this cycle · of ${TEAM_TARGET.toLocaleString('en-IN')} team target`, cls:''},
-    {label:'Forms Remaining', value: totalRemaining.toLocaleString('en-IN'), sub:'To reach 35K team target', cls:''},
+    {label:'Forms Completed', value: totalCompleted.toLocaleString('en-IN'), sub:`${pctCompleted.toFixed(1)}% of ${TEAM_TARGET.toLocaleString('en-IN')} team target`, cls:''},
+    {label:'Forms Remaining', value: totalRemaining.toLocaleString('en-IN'), sub:`${pctRemaining.toFixed(1)}% of 35K team target left`, cls:''},
     {label:'Avg Accuracy', value: fmtAcc(avgAccuracy), sub: avgAccuracy===null ? 'Not yet recorded' : 'Team quality score', cls: avgAccuracy===null?'':'green'},
     {label:'Incentives Paid', value: inr(totalIncentivePaid), sub:'Cumulative payout', cls:'gold'},
     {label:'Best Last Day', value: bestLastDay.name, sub: bestLastDay.lastDay+' forms completed', cls:'accent'},
@@ -787,20 +831,25 @@ function render(){
     </div>`).join('');
 
   document.getElementById('tblCount').textContent = data.length + ' employees tracked';
-  document.getElementById('tblBody').innerHTML = data.map(e=>`
+  document.getElementById('tblBody').innerHTML = data.map(e=>{
+    const dailyPaceTarget = TARGET / 20;
+    const lastDayPct = dailyPaceTarget > 0 ? Math.min(999, (e.lastDay / dailyPaceTarget) * 100) : 0;
+    const totalPct = TARGET > 0 ? e.progressPct : 0;
+    const remainingPct = TARGET > 0 ? Math.max(0, 100 - totalPct) : 0;
+    return `
     <tr>
       <td class="name-cell">${e.name}</td>
       <td class="num">${TARGET}</td>
-      <td class="num">${e.lastDay}</td>
-      <td class="num">${e.total.toLocaleString('en-IN')}</td>
-      <td class="num">${e.remaining.toLocaleString('en-IN')}</td>
+      <td class="num">${e.lastDay}<span class="pct-inline">(${lastDayPct.toFixed(1)}%)</span></td>
+      <td class="num">${e.total.toLocaleString('en-IN')}<span class="pct-inline">(${totalPct.toFixed(1)}%)</span></td>
+      <td class="num">${e.remaining.toLocaleString('en-IN')}<span class="pct-inline">(${remainingPct.toFixed(1)}%)</span></td>
       <td class="num">${inr(e.lastDayIncentive)}</td>
       <td class="num">${inr(e.totalIncentive)}</td>
       <td class="num ${accClass(e.accuracy)}">${fmtAcc(e.accuracy)}</td>
       <td><div class="progress-track"><div class="progress-fill ${progressClass(e.status)}" data-pct="${e.progressPct}"></div></div></td>
       <td class="center">${statusBadge(e.status)}</td>
     </tr>
-  `).join('');
+  `;}).join('');
   requestAnimationFrame(()=>{
     setTimeout(()=>{
       document.querySelectorAll('.progress-fill').forEach(el=>{ el.style.width = el.getAttribute('data-pct') + '%'; });
@@ -952,6 +1001,178 @@ document.getElementById('settingsSaveBtn').addEventListener('click', ()=>{
   saveCycle({ start: new Date(startVal + 'T00:00:00'), end: new Date(endVal + 'T00:00:00') });
   location.reload();
 });
+
+/* ================= REPORTS ================= */
+const reportsOverlay = document.getElementById('reportsOverlay');
+const reportStartInput = document.getElementById('reportStartInput');
+const reportEndInput = document.getElementById('reportEndInput');
+const reportSummary = document.getElementById('reportSummary');
+const reportTableWrap = document.getElementById('reportTableWrap');
+const reportBody = document.getElementById('reportBody');
+let lastReport = null; // { startKey, endKey, rows: [...], totals: {...} }
+
+function openReportsModal(){
+  reportStartInput.max = TODAY_KEY;
+  reportEndInput.max = TODAY_KEY;
+  reportStartInput.value = TODAY_KEY;
+  reportEndInput.value = TODAY_KEY;
+  reportSummary.textContent = '';
+  reportTableWrap.style.display = 'none';
+  setExportButtonsEnabled(false);
+  reportsOverlay.classList.add('open');
+}
+function closeReportsModal(){ reportsOverlay.classList.remove('open'); }
+document.getElementById('reportsBtn').addEventListener('click', openReportsModal);
+document.getElementById('reportsCloseBtn').addEventListener('click', closeReportsModal);
+reportsOverlay.addEventListener('click', (e)=>{ if(e.target === reportsOverlay) closeReportsModal(); });
+
+function setExportButtonsEnabled(enabled){
+  ['exportCsvBtn','exportExcelBtn','exportPdfBtn'].forEach(id=>{
+    document.getElementById(id).disabled = !enabled;
+  });
+}
+
+function setReportRange(start, end){
+  reportStartInput.value = toKey(start);
+  reportEndInput.value = toKey(end > TODAY ? TODAY : end);
+}
+document.getElementById('presetTodayBtn').addEventListener('click', ()=>setReportRange(TODAY, TODAY));
+document.getElementById('presetWeekBtn').addEventListener('click', ()=>{
+  const day = TODAY.getDay(); // 0=Sun..6=Sat
+  const mondayOffset = (day === 0) ? 6 : day - 1;
+  const monday = new Date(TODAY); monday.setDate(monday.getDate() - mondayOffset);
+  const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
+  setReportRange(monday, sunday);
+});
+document.getElementById('presetMonthBtn').addEventListener('click', ()=>{
+  const first = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
+  const last = new Date(TODAY.getFullYear(), TODAY.getMonth()+1, 0);
+  setReportRange(first, last);
+});
+document.getElementById('presetYearBtn').addEventListener('click', ()=>{
+  const first = new Date(TODAY.getFullYear(), 0, 1);
+  const last = new Date(TODAY.getFullYear(), 11, 31);
+  setReportRange(first, last);
+});
+
+function dateKeysInRange(startKey, endKey){
+  const keys = [];
+  const d = new Date(startKey + 'T00:00:00');
+  const end = new Date(endKey + 'T00:00:00');
+  while(d <= end){
+    keys.push(toKey(d));
+    d.setDate(d.getDate()+1);
+  }
+  return keys;
+}
+
+document.getElementById('generateReportBtn').addEventListener('click', ()=>{
+  let startKey = reportStartInput.value;
+  let endKey = reportEndInput.value;
+  if(!startKey || !endKey){ alert('Please choose both a start and end date.'); return; }
+  if(endKey > TODAY_KEY) endKey = TODAY_KEY;
+  if(startKey > endKey){ alert('Start date must be on or before the end date.'); return; }
+  const keys = dateKeysInRange(startKey, endKey);
+  const rows = sortedByName(employees).map(emp=>{
+    const recs = dailyRecords[emp.id] || {};
+    let forms = 0, incentive = 0, accWeighted = 0, accWeight = 0;
+    keys.forEach(k=>{
+      const r = recs[k];
+      if(r && r.forms > 0){
+        forms += r.forms;
+        incentive += computeDailyIncentive(r.forms, r.accuracy);
+        if(r.accuracy !== null && r.accuracy !== undefined){
+          accWeighted += r.forms * r.accuracy;
+          accWeight += r.forms;
+        }
+      }
+    });
+    const accuracy = accWeight > 0 ? (accWeighted/accWeight) : null;
+    const pctOfTarget = TARGET > 0 ? (forms / TARGET * 100) : 0;
+    return { name: emp.name, forms, accuracy, incentive, pctOfTarget };
+  });
+  const totalForms = rows.reduce((s,r)=>s+r.forms,0);
+  const totalIncentive = rows.reduce((s,r)=>s+r.incentive,0);
+  const withAcc = rows.filter(r=>r.accuracy!==null);
+  const avgAcc = withAcc.length ? withAcc.reduce((s,r)=>s+r.accuracy,0)/withAcc.length : null;
+  const pctOfTeamTarget = TEAM_TARGET > 0 ? (totalForms / TEAM_TARGET * 100) : 0;
+
+  lastReport = { startKey, endKey, rows, totals:{ totalForms, totalIncentive, avgAcc, pctOfTeamTarget } };
+
+  reportSummary.innerHTML = `<b style="color:var(--text-hi);">${startKey}</b> to <b style="color:var(--text-hi);">${endKey}</b> · ` +
+    `Total forms: <b style="color:var(--cyan);">${totalForms.toLocaleString('en-IN')}</b> (${pctOfTeamTarget.toFixed(1)}% of ${TEAM_TARGET.toLocaleString('en-IN')} team target) · ` +
+    `Avg accuracy: <b style="color:var(--green);">${avgAcc===null?'NA':avgAcc.toFixed(2)+'%'}</b> · ` +
+    `Total incentive: <b style="color:var(--gold-strong);">${inr(totalIncentive)}</b>`;
+
+  reportBody.innerHTML = rows.map(r=>`
+    <tr>
+      <td class="name-td">${r.name}</td>
+      <td style="font-family:'JetBrains Mono',monospace;">${r.forms.toLocaleString('en-IN')}</td>
+      <td style="font-family:'JetBrains Mono',monospace;">${r.pctOfTarget.toFixed(1)}%</td>
+      <td style="font-family:'JetBrains Mono',monospace;">${fmtAcc(r.accuracy)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;">${inr(r.incentive)}</td>
+    </tr>`).join('');
+  reportTableWrap.style.display = 'block';
+  setExportButtonsEnabled(true);
+});
+
+document.getElementById('exportCsvBtn').addEventListener('click', ()=>{
+  if(!lastReport) return;
+  const header = ['Employee','Forms Completed','% of Personal Target','Accuracy %','Incentive Earned (INR)'];
+  const lines = [header.join(',')];
+  lastReport.rows.forEach(r=>{
+    lines.push([
+      `"${r.name}"`, r.forms, r.pctOfTarget.toFixed(1),
+      r.accuracy===null?'NA':r.accuracy.toFixed(2), Math.round(r.incentive)
+    ].join(','));
+  });
+  lines.push('');
+  lines.push(`Total,${lastReport.totals.totalForms},${lastReport.totals.pctOfTeamTarget.toFixed(1)}% of team target,${lastReport.totals.avgAcc===null?'NA':lastReport.totals.avgAcc.toFixed(2)},${Math.round(lastReport.totals.totalIncentive)}`);
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  downloadBlob(blob, `Auzentis_Report_${lastReport.startKey}_to_${lastReport.endKey}.csv`);
+});
+
+document.getElementById('exportExcelBtn').addEventListener('click', ()=>{
+  if(!lastReport) return;
+  const aoa = [['Employee','Forms Completed','% of Personal Target','Accuracy %','Incentive Earned (INR)']];
+  lastReport.rows.forEach(r=>{
+    aoa.push([r.name, r.forms, Number(r.pctOfTarget.toFixed(1)), r.accuracy===null?'NA':Number(r.accuracy.toFixed(2)), Math.round(r.incentive)]);
+  });
+  aoa.push([]);
+  aoa.push(['Total', lastReport.totals.totalForms, Number(lastReport.totals.pctOfTeamTarget.toFixed(1)), lastReport.totals.avgAcc===null?'NA':Number(lastReport.totals.avgAcc.toFixed(2)), Math.round(lastReport.totals.totalIncentive)]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:16},{wch:16},{wch:20},{wch:12},{wch:20}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Report');
+  XLSX.writeFile(wb, `Auzentis_Report_${lastReport.startKey}_to_${lastReport.endKey}.xlsx`);
+});
+
+document.getElementById('exportPdfBtn').addEventListener('click', ()=>{
+  if(!lastReport) return;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(14);
+  doc.text('Auzentis Productivity Report', 14, 16);
+  doc.setFontSize(10);
+  doc.text(`${lastReport.startKey} to ${lastReport.endKey}`, 14, 23);
+  doc.autoTable({
+    startY: 28,
+    head: [['Employee','Forms Completed','% of Personal Target','Accuracy %','Incentive Earned (INR)']],
+    body: lastReport.rows.map(r=>[r.name, r.forms, r.pctOfTarget.toFixed(1)+'%', fmtAcc(r.accuracy), inr(r.incentive)]),
+    foot: [['Total', lastReport.totals.totalForms, lastReport.totals.pctOfTeamTarget.toFixed(1)+'% of team target', lastReport.totals.avgAcc===null?'NA':lastReport.totals.avgAcc.toFixed(2)+'%', inr(lastReport.totals.totalIncentive)]],
+    styles:{ fontSize:9 },
+    headStyles:{ fillColor:[13,32,96] }
+  });
+  doc.save(`Auzentis_Report_${lastReport.startKey}_to_${lastReport.endKey}.pdf`);
+});
+
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 /* ================= EDIT MODAL LOGIC ================= */
 const modalOverlay = document.getElementById('modalOverlay');
