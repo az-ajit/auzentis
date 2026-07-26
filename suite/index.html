@@ -116,7 +116,7 @@
     <p class="helptext" style="text-align:center;margin-top:12px;">
       <a href="#" id="authToggleLink" style="color:var(--navy);">Need an account? Sign up</a>
     </p>
-    <p class="helptext" style="text-align:center;">The first person to sign up becomes Admin.</p>
+    <p class="helptext" style="text-align:center;">New accounts require Admin approval before you can sign in.</p>
   </div>
 </div>
 
@@ -276,8 +276,12 @@ async function signUpUser(email, password, name){
   if(error) throw error;
   if(data.user){
     const { count } = await sb.from("profiles").select("*", { count: "exact", head: true });
-    const role = (!count || count === 0) ? "Admin" : "Employee";
-    await sb.from("profiles").insert({ id: data.user.id, name, role });
+    const isFirst = !count || count === 0;
+    await sb.from("profiles").insert({
+      id: data.user.id, name,
+      role: isFirst ? "Admin" : "Employee",
+      status: isFirst ? "Approved" : "Pending"
+    });
   }
   return data;
 }
@@ -292,11 +296,24 @@ async function loadProfile(userId){
   let { data } = await sb.from("profiles").select("*").eq("id", userId).maybeSingle();
   if(!data){
     const { count } = await sb.from("profiles").select("*", { count: "exact", head: true });
-    const role = (!count || count === 0) ? "Admin" : "Employee";
-    await sb.from("profiles").insert({ id: userId, name: currentUser.email, role });
+    const isFirst = !count || count === 0;
+    await sb.from("profiles").insert({
+      id: userId, name: currentUser.email,
+      role: isFirst ? "Admin" : "Employee",
+      status: isFirst ? "Approved" : "Pending"
+    });
     ({ data } = await sb.from("profiles").select("*").eq("id", userId).maybeSingle());
   }
   return data;
+}
+
+// Thrown when a valid login belongs to an account that isn't approved yet
+class NotApprovedError extends Error {
+  constructor(status){ super(
+    status === "Rejected"
+      ? "Your account request was not approved. Contact your Admin if you think this is a mistake."
+      : "Your account is awaiting Admin approval. You'll be able to sign in once approved."
+  ); this.name = "NotApprovedError"; }
 }
 
 // ============================= STORAGE (Supabase) =============================
@@ -1348,10 +1365,26 @@ async function loadTeam(){
   teamMembers = data || [];
 }
 function renderTeam(){
-  const rows = teamMembers.map(p=>`
+  const pending = teamMembers.filter(p=>p.status==="Pending");
+  const others = teamMembers.filter(p=>p.status!=="Pending");
+
+  const pendingRows = pending.map(p=>`
     <tr data-id="${p.id}">
       <td>${p.name}</td>
-      <td>${p.id === currentUser.id ? "(you)" : ""}</td>
+      <td>
+        <select class="pendingRoleSelect" data-id="${p.id}">
+          ${Object.keys(ROLE_TABS).map(r=>`<option value="${r}" ${r===p.role?"selected":""}>${r}</option>`).join("")}
+        </select>
+      </td>
+      <td class="actions">
+        <button class="btn gold sm approveUserBtn">Approve</button>
+        <button class="btn danger sm rejectUserBtn">Reject</button>
+      </td>
+    </tr>`).join("");
+
+  const rows = others.map(p=>`
+    <tr data-id="${p.id}">
+      <td>${p.name}${p.id === currentUser.id ? " (you)" : ""}</td>
       <td>
         <select class="teamRoleSelect" data-id="${p.id}" ${p.id===currentUser.id?"disabled":""}>
           ${Object.keys(ROLE_TABS).map(r=>`<option value="${r}" ${r===p.role?"selected":""}>${r}</option>`).join("")}
@@ -1363,16 +1396,32 @@ function renderTeam(){
           ${DB.employees.map(e=>`<option value="${e.id}" ${e.id===p.emp_id?"selected":""}>${e.id} — ${e.name}</option>`).join("")}
         </select>
       </td>
+      <td><span class="pill ${p.status==='Approved'?'ok':'warn'}">${p.status}</span></td>
+      <td class="actions">
+        ${p.id !== currentUser.id ? `<button class="btn danger sm deleteUserBtn">Delete</button>` : ''}
+      </td>
     </tr>`).join("");
+
   return `
+  ${pending.length ? `
   <div class="card">
-    <h2>Team &amp; Roles</h2>
-    <div class="sub">Manage who has access and what they can see. Only Admins can change roles here.</div>
-    <p class="helptext">This controls what each person sees in the app. It does not replace database-level security — every logged-in team member technically has full data access at the database level (see the Row Level Security notes from setup). If you need stricter per-role database enforcement, that is a further enhancement.</p>
+    <h2>Pending Approval (${pending.length})</h2>
+    <div class="sub">These people signed up and are waiting on you before they can log in.</div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Name</th><th></th><th>Role</th><th>Linked Employee (for "Employee" role)</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="4" class="empty">No team members yet.</td></tr>`}</tbody>
+        <thead><tr><th>Name</th><th>Assign Role</th><th></th></tr></thead>
+        <tbody>${pendingRows}</tbody>
+      </table>
+    </div>
+  </div>` : ''}
+  <div class="card">
+    <h2>Team &amp; Roles</h2>
+    <div class="sub">Manage who has access and what they can see.</div>
+    <p class="helptext">New logins are always created by the person themselves via "Sign up" on the login screen (for security, an Admin page can't create passwords for people). Once they sign up, they'll appear above under Pending Approval. "Delete" here revokes their access to the app but does not delete their underlying login account — for that, remove them from Supabase → Authentication → Users directly.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Name</th><th>Role</th><th>Linked Employee (for "Employee" role)</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">No approved team members yet.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -1650,6 +1699,34 @@ function attachHandlers(){
       const p = teamMembers.find(x=>x.id===id); if(p) p.emp_id = sel.value || null;
       toast("Linked employee updated.");
     });
+    document.querySelectorAll(".approveUserBtn").forEach(b=>b.onclick=async (e)=>{
+      const id = e.target.closest("tr").dataset.id;
+      const role = document.querySelector(`.pendingRoleSelect[data-id="${id}"]`).value;
+      const { error } = await sb.from("profiles").update({ status: "Approved", role }).eq("id", id);
+      if(error){ toast("Could not approve: " + error.message, true); return; }
+      await loadTeam();
+      toast("User approved.");
+      renderAll();
+    });
+    document.querySelectorAll(".rejectUserBtn").forEach(b=>b.onclick=async (e)=>{
+      const id = e.target.closest("tr").dataset.id;
+      if(!confirm("Reject this account request? They will not be able to log in.")) return;
+      const { error } = await sb.from("profiles").update({ status: "Rejected" }).eq("id", id);
+      if(error){ toast("Could not reject: " + error.message, true); return; }
+      await loadTeam();
+      toast("User rejected.");
+      renderAll();
+    });
+    document.querySelectorAll(".deleteUserBtn").forEach(b=>b.onclick=async (e)=>{
+      const id = e.target.closest("tr").dataset.id;
+      const p = teamMembers.find(x=>x.id===id);
+      if(!confirm(`Delete ${p?p.name:"this user"}? This revokes their access to the app immediately. Their login account itself must be removed separately in Supabase → Authentication → Users if you want it fully gone.`)) return;
+      const { error } = await sb.from("profiles").delete().eq("id", id);
+      if(error){ toast("Could not delete: " + error.message, true); return; }
+      await loadTeam();
+      toast("User removed.");
+      renderAll();
+    });
   }
 }
 
@@ -1749,7 +1826,7 @@ async function startApp(){
       if(mode === "signup"){
         data = await signUpUser(email, password, name);
         if(!data.session){
-          showAuthError("Account created. If email confirmation is enabled in your Supabase project, check your inbox, then sign in.");
+          showAuthError("Account request submitted. If email confirmation is enabled in your Supabase project, check your inbox and confirm first. An Admin must also approve your account before you can sign in.");
           setAuthMode("login");
           document.getElementById("authSubmitBtn").disabled = false;
           return;
@@ -1759,6 +1836,15 @@ async function startApp(){
       }
       currentUser = data.user;
       currentProfile = await loadProfile(currentUser.id);
+      if(currentProfile.status !== "Approved"){
+        const msg = new NotApprovedError(currentProfile.status).message;
+        await sb.auth.signOut();
+        currentUser = null; currentProfile = null;
+        showAuthError(mode === "signup" ? "Account request submitted. " + msg : msg);
+        setAuthMode("login");
+        document.getElementById("authSubmitBtn").disabled = false;
+        return;
+      }
       await startApp();
     }catch(err){
       showAuthError(err.message || "Something went wrong.");
@@ -1773,7 +1859,15 @@ async function startApp(){
     if(session){
       currentUser = session.user;
       currentProfile = await loadProfile(currentUser.id);
-      await startApp();
+      if(currentProfile.status !== "Approved"){
+        const msg = new NotApprovedError(currentProfile.status).message;
+        await sb.auth.signOut();
+        currentUser = null; currentProfile = null;
+        document.getElementById("authScreen").style.display = "block";
+        showAuthError(msg);
+      } else {
+        await startApp();
+      }
     } else {
       document.getElementById("authScreen").style.display = "block";
     }
