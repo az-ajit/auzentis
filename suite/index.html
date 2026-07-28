@@ -206,7 +206,7 @@ const ROLE_TABS = {
   "HR": ["Dashboard","Employees","Attendance","Leaves","Payroll","Payments","Payslip","Reports"],
   "Accounts": ["Dashboard","Settings","Payroll","Payments","Ledger","Payslip","Accounting","Reports"],
   "Sales": ["Dashboard","CRM","Reports"],
-  "Employee": ["Dashboard","Payslip","Leaves"]
+  "Employee": ["Dashboard","Attendance","Payslip","Leaves"]
 };
 let currentRole = "Admin";
 let currentEmpId = null; // used to scope "Employee" role to one person
@@ -282,8 +282,8 @@ const TABLE_CONFIG = {
     toRow:x=>({id:x.id,date:x.date,category:x.category,description:x.description,amount:x.amount,paid_via:x.paidVia}),
     fromRow:r=>({id:r.id,date:r.date,category:r.category,description:r.description,amount:Number(r.amount),paidVia:r.paid_via}) },
   attendance:   { table:"attendance",
-    toRow:a=>({id:a.id,date:a.date,emp_id:a.empId,status:a.status}),
-    fromRow:r=>({id:r.id,date:r.date,empId:r.emp_id,status:r.status}) },
+    toRow:a=>({id:a.id,date:a.date,emp_id:a.empId,status:a.status,marked_at:a.markedAt||null}),
+    fromRow:r=>({id:r.id,date:r.date,empId:r.emp_id,status:r.status,markedAt:r.marked_at}) },
   leaves:       { table:"leaves",
     toRow:l=>({id:l.id,emp_id:l.empId,type:l.type,from_date:l.fromDate,to_date:l.toDate,reason:l.reason,status:l.status}),
     fromRow:r=>({id:r.id,empId:r.emp_id,type:r.type,fromDate:r.from_date,toDate:r.to_date,reason:r.reason,status:r.status}) },
@@ -997,6 +997,11 @@ function renderAccounting(){
 let attDate = null;
 function renderAttendance(){
   if(!attDate) attDate = new Date().toISOString().slice(0,10);
+
+  if(currentRole === "Employee"){
+    return renderMyAttendance();
+  }
+
   const rows = DB.employees.map(e=>{
     const rec = DB.attendance.find(a=>a.date===attDate&&a.empId===e.id);
     const status = rec ? rec.status : "Present";
@@ -1007,6 +1012,7 @@ function renderAttendance(){
           ${["Present","Absent","Half Day","On Leave"].map(s=>`<option ${s===status?'selected':''}>${s}</option>`).join("")}
         </select>
       </td>
+      <td>${rec && rec.markedAt ? new Date(rec.markedAt).toLocaleString() : '<span class="helptext">not self-marked</span>'}</td>
     </tr>`;
   }).join("");
 
@@ -1018,7 +1024,7 @@ function renderAttendance(){
   return `
   <div class="card">
     <h2>Daily Attendance</h2>
-    <div class="sub">Mark attendance for the selected date.</div>
+    <div class="sub">Each employee marks their own attendance when they log in. Use this to review or correct any day.</div>
     <div class="row">
       <div class="field" style="max-width:160px;"><label>Date</label><input type="date" id="attDateInput" value="${attDate}"></div>
       <button class="btn ghost" id="loadAttBtn">Load</button>
@@ -1027,11 +1033,74 @@ function renderAttendance(){
     <div class="grid grid-4">${summary}</div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>Status</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="3" class="empty">No employees found.</td></tr>`}</tbody>
+        <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Marked At</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No employees found.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
+}
+
+function renderMyAttendance(){
+  const emp = DB.employees.find(e=>e.id===currentEmpId);
+  const today = new Date().toISOString().slice(0,10);
+  const todayRec = DB.attendance.find(a=>a.date===today && a.empId===currentEmpId);
+
+  const history = DB.attendance.filter(a=>a.empId===currentEmpId)
+    .sort((a,b)=>b.date.localeCompare(a.date))
+    .slice(0,14);
+  const historyRows = history.map(a=>`
+    <tr><td>${a.date}</td><td>${a.status}</td><td>${a.markedAt ? new Date(a.markedAt).toLocaleTimeString() : ''}</td></tr>`).join("");
+
+  if(!emp){
+    return `<div class="card"><div class="empty">Your login isn't linked to an employee record yet. Ask your Admin to link you in the Team tab.</div></div>`;
+  }
+
+  return `
+  <div class="card">
+    <h2>My Attendance — ${today}</h2>
+    <div class="sub">Mark your attendance for today. You can update it any time today; your Admin can also review or correct it.</div>
+    ${todayRec ? `
+      <p>Today you're marked as <span class="pill ${todayRec.status==='Present'?'ok':'warn'}">${todayRec.status}</span>
+      ${todayRec.markedAt ? ' at ' + new Date(todayRec.markedAt).toLocaleTimeString() : ''}. You can change this below.</p>
+    ` : `<p class="helptext">You haven't marked attendance for today yet.</p>`}
+    <div class="row">
+      ${["Present","Half Day","On Leave","Absent"].map(s=>
+        `<button class="btn ${s===(todayRec?todayRec.status:'')?'gold':'ghost'} selfMarkBtn" data-status="${s}">${s}</button>`
+      ).join("")}
+    </div>
+  </div>
+  <div class="card">
+    <h2>My Recent Attendance</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Date</th><th>Status</th><th>Marked At</th></tr></thead>
+        <tbody>${historyRows || `<tr><td colspan="3" class="empty">No attendance marked yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+async function markMyAttendance(status){
+  const today = new Date().toISOString().slice(0,10);
+  const now = new Date().toISOString();
+  let rec = DB.attendance.find(a=>a.date===today && a.empId===currentEmpId);
+  if(!rec){ rec = {id:newId("AT"), date:today, empId:currentEmpId, status, markedAt:now}; DB.attendance.push(rec); }
+  else { rec.status = status; rec.markedAt = now; if(!rec.id) rec.id = newId("AT"); }
+
+  try{
+    // Direct row-level upsert (safe for many people marking at once) —
+    // does NOT touch the rest of the attendance table, unlike save("attendance").
+    const { error } = await sb.from("attendance").upsert(
+      { id: rec.id, date: rec.date, emp_id: rec.empId, status: rec.status, marked_at: rec.markedAt },
+      { onConflict: "date,emp_id" }
+    );
+    if(error){ toast("Could not save attendance: " + error.message, true); return; }
+    toast("Marked as " + status + " for today.");
+    renderAll();
+  }catch(e){
+    console.error(e);
+    toast("Could not save attendance: " + e.message, true);
+  }
 }
 
 // ============================= LEAVES =============================
@@ -1728,18 +1797,24 @@ function attachHandlers(){
   }
 
   if(activeTab==="Attendance"){
-    document.getElementById("loadAttBtn").onclick = ()=>{ attDate = val("attDateInput"); renderAll(); };
-    document.getElementById("saveAttBtn").onclick = async ()=>{
-      document.querySelectorAll(".attStatus").forEach(sel=>{
-        const empId = sel.dataset.emp;
-        let rec = DB.attendance.find(a=>a.date===attDate&&a.empId===empId);
-        if(!rec){ rec = {date:attDate, empId, status:sel.value}; DB.attendance.push(rec); }
-        else rec.status = sel.value;
+    if(currentRole === "Employee"){
+      document.querySelectorAll(".selfMarkBtn").forEach(b=>b.onclick=async ()=>{
+        await markMyAttendance(b.dataset.status);
       });
-      await save("attendance");
-      toast("Attendance saved for "+attDate+".");
-      renderAll();
-    };
+    } else {
+      document.getElementById("loadAttBtn").onclick = ()=>{ attDate = val("attDateInput"); renderAll(); };
+      document.getElementById("saveAttBtn").onclick = async ()=>{
+        document.querySelectorAll(".attStatus").forEach(sel=>{
+          const empId = sel.dataset.emp;
+          let rec = DB.attendance.find(a=>a.date===attDate&&a.empId===empId);
+          if(!rec){ rec = {date:attDate, empId, status:sel.value}; DB.attendance.push(rec); }
+          else rec.status = sel.value;
+        });
+        await save("attendance");
+        toast("Attendance saved for "+attDate+".");
+        renderAll();
+      };
+    }
   }
 
   if(activeTab==="Leaves"){
