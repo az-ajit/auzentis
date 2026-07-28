@@ -206,7 +206,7 @@ const ROLE_TABS = {
   "HR": ["Dashboard","Employees","Attendance","Leaves","Payroll","Payments","Payslip","Reports"],
   "Accounts": ["Dashboard","Settings","Payroll","Payments","Ledger","Payslip","Accounting","Reports"],
   "Sales": ["Dashboard","CRM","Reports"],
-  "Employee": ["Dashboard","Attendance","Payslip","Leaves"]
+  "Employee": ["Dashboard","Attendance"]
 };
 let currentRole = "Admin";
 let currentEmpId = null; // used to scope "Employee" role to one person
@@ -471,9 +471,9 @@ function renderRoleSelector(){
   if(label && currentProfile){
     label.textContent = currentProfile.name + " (" + currentProfile.role + ")";
   }
+  const isAdmin = currentProfile && currentProfile.role === "Admin";
   const roleSelect = document.getElementById("roleSelect");
   if(roleSelect){
-    const isAdmin = currentProfile && currentProfile.role === "Admin";
     roleSelect.innerHTML = Object.keys(ROLE_TABS).map(r=>`<option value="${r}" ${r===currentRole?'selected':''}>${r}</option>`).join("");
     roleSelect.disabled = !isAdmin;
     roleSelect.title = isAdmin ? "Admins can preview any role's view" : "Your role is set by your Admin";
@@ -486,11 +486,20 @@ function renderRoleSelector(){
       renderAll();
     };
   }
+  // The employee-scope dropdown is ONLY for an Admin previewing the Employee view.
+  // A real Employee login must NEVER be able to change whose record they see/act on —
+  // their emp_id is fixed to their own profile, set once at login (see startApp()).
   const empScope = document.getElementById("empScopeSelect");
   if(empScope){
-    empScope.innerHTML = DB.employees.map(e=>`<option value="${e.id}" ${e.id===currentEmpId?'selected':''}>${e.id} — ${e.name}</option>`).join("");
-    empScope.style.display = currentRole==="Employee" ? "inline-block" : "none";
-    empScope.onchange = ()=>{ currentEmpId = empScope.value; renderAll(); };
+    if(isAdmin){
+      empScope.innerHTML = DB.employees.map(e=>`<option value="${e.id}" ${e.id===currentEmpId?'selected':''}>${e.id} — ${e.name}</option>`).join("");
+      empScope.style.display = currentRole==="Employee" ? "inline-block" : "none";
+      empScope.disabled = false;
+      empScope.onchange = ()=>{ currentEmpId = empScope.value; renderAll(); };
+    } else {
+      empScope.style.display = "none";
+      empScope.onchange = null;
+    }
   }
 }
 
@@ -516,6 +525,10 @@ function renderAll(){
 
 // ============================= DASHBOARD =============================
 function renderDashboard(){
+  if(currentRole === "Employee"){
+    return renderMyDashboard();
+  }
+
   const periods = distinctPeriods();
   const latest = periods[periods.length-1];
   let rows = latest ? DB.payroll.filter(p=>p.month===latest.month&&p.year===latest.year).map(computePayroll).filter(Boolean) : [];
@@ -550,7 +563,23 @@ function renderDashboard(){
       <div><b>Accounting</b><p class="helptext">Invoices, expenses and a live profit &amp; loss summary.</p></div>
       <div><b>HR &amp; CRM</b><p class="helptext">Attendance, leave requests and a simple sales pipeline.</p></div>
     </div>
-    <p class="helptext" style="margin-top:10px;">Note: the role switcher above reorganizes what each person sees in this app — it is not a secure login system. Anyone with this file/link can see all data. For real access control across separate logins, this would need a proper backend.</p>
+    <p class="helptext" style="margin-top:10px;">Note: the role switcher above reorganizes what each person sees in this app — it is not a secure login system for Admin/HR/Accounts/Sales views (they all still see full company data by design). A real Employee login is properly restricted at both the UI and their own scope — see the Team tab.</p>
+  </div>`;
+}
+
+function renderMyDashboard(){
+  const emp = DB.employees.find(e=>e.id===currentEmpId);
+  const today = new Date().toISOString().slice(0,10);
+  const todayRec = DB.attendance.find(a=>a.date===today && a.empId===currentEmpId);
+  const status = todayRec ? (todayRec.punchOut ? "Punched Out" : todayRec.punchIn ? "Punched In" : "Not marked") : "Not marked";
+  return `
+  <div class="grid grid-2">
+    <div class="stat"><div class="lbl">Today's Attendance</div><div class="val">${status}</div></div>
+    <div class="stat"><div class="lbl">Welcome</div><div class="val">${emp ? emp.name : "—"}</div></div>
+  </div>
+  <div class="card">
+    <h2>Welcome to Auzentis</h2>
+    <div class="sub">Use the Attendance tab to punch in when you start work and punch out when you finish.</div>
   </div>`;
 }
 
@@ -1566,6 +1595,21 @@ function renderTeam(){
 
   return `
   <div class="card">
+    <h2>Create a User Directly</h2>
+    <div class="sub">Set their name, email, password, and role right now — they can log in immediately, no signup step needed.</div>
+    <div class="grid grid-4">
+      <div class="field"><label>Name</label><input id="cu_name" placeholder="Full name"></div>
+      <div class="field"><label>Email</label><input id="cu_email" type="email" placeholder="person@auzentis.com"></div>
+      <div class="field"><label>Password</label><input id="cu_password" type="password" placeholder="At least 6 characters"></div>
+      <div class="field"><label>Role</label><select id="cu_role">${Object.keys(ROLE_TABS).map(r=>`<option>${r}</option>`).join("")}</select></div>
+      <div class="field"><label>Linked Employee (optional, for "Employee" role)</label>
+        <select id="cu_empid"><option value="">—</option>${DB.employees.map(e=>`<option value="${e.id}">${e.id} — ${e.name}</option>`).join("")}</select>
+      </div>
+      <div class="field" style="display:flex;align-items:end;"><button class="btn gold" id="createUserBtn" style="width:100%;">Create User</button></div>
+    </div>
+    <p class="helptext">Requires the <code>admin-create-user</code> Edge Function to be deployed in your Supabase project (one-time setup — see the .ts file provided).</p>
+  </div>
+  <div class="card">
     <h2>Add a Team Member</h2>
     <div class="sub">Invite someone by email. When they sign up with that exact email, they're auto-approved with the role you set here — no separate approval step needed.</div>
     <div class="grid grid-4">
@@ -1994,6 +2038,34 @@ function attachHandlers(){
     };
   }
   if(activeTab==="Team"){
+    document.getElementById("createUserBtn").onclick = async ()=>{
+      const name = val("cu_name").trim();
+      const email = val("cu_email").trim().toLowerCase();
+      const password = val("cu_password");
+      if(!name || !email || !password){ toast("Name, email, and password are required.", true); return; }
+      if(password.length < 6){ toast("Password must be at least 6 characters.", true); return; }
+      const btn = document.getElementById("createUserBtn");
+      btn.disabled = true; btn.textContent = "Creating…";
+      try{
+        const { data, error } = await sb.functions.invoke("admin-create-user", {
+          body: { email, password, name, role: val("cu_role"), emp_id: val("cu_empid") || null }
+        });
+        if(error){
+          console.error("Create user failed:", error);
+          toast("Could not create user: " + error.message + " — make sure the admin-create-user Edge Function is deployed.", true);
+          return;
+        }
+        if(data && data.error){ toast("Could not create user: " + data.error, true); return; }
+        await loadTeam();
+        toast(name + " can now log in with the password you set.");
+        renderAll();
+      }catch(e){
+        console.error("Create user threw:", e);
+        toast("Could not create user: " + e.message, true);
+      }finally{
+        btn.disabled = false; btn.textContent = "Create User";
+      }
+    };
     document.getElementById("addInviteBtn").onclick = async ()=>{
       const email = val("inv_email").trim().toLowerCase();
       if(!email || !email.includes("@")){ toast("Enter a valid email.", true); return; }
