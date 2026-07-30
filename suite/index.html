@@ -613,6 +613,33 @@ function renderSettings(){
     </div>
     <p class="helptext">Maharashtra charges ₹300 in February instead of ₹200 to reach the annual PT cap — adjust manually for that month if this applies to you. TDS is not auto-calculated; enter it per employee in Payroll.</p>
     <button class="btn gold" id="saveSettingsBtn">Save Settings</button>
+  </div>
+  <div class="card">
+    <h2>Office Network (Attendance Restriction)</h2>
+    <div class="sub">Employees can only Punch In / Punch Out while their device's public IP matches one listed here. You (Admin) are never restricted — you can access from anywhere.</div>
+    <p class="helptext">
+      <b>Important:</b> a website cannot detect WiFi network names for privacy reasons — this checks the device's <i>public IP address</i> instead.
+      That only works reliably if your office has a <b>fixed/static IP</b> from your ISP. If your office IP changes (common with regular
+      broadband), employees will be blocked until you update it here. Also note a determined employee could still bypass this with a VPN or
+      mobile hotspot — treat this as a policy control, not unbeatable security.
+    </p>
+    <div class="row">
+      <div class="field" style="max-width:220px;"><label>IP Address</label><input id="ip_address" placeholder="e.g. 103.21.58.4"></div>
+      <div class="field" style="max-width:200px;"><label>Label</label><input id="ip_label" placeholder="e.g. Pune Office"></div>
+      <button class="btn ghost" id="detectIpBtn">Detect My Current IP</button>
+      <button class="btn gold" id="addIpBtn">Add IP</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>IP Address</th><th>Label</th><th></th></tr></thead>
+        <tbody>${allowedIps.map(r=>`
+          <tr data-ip="${r.ip}">
+            <td>${r.ip}</td><td>${r.label||''}</td>
+            <td><button class="btn danger sm delIpBtn">Delete</button></td>
+          </tr>`).join("") || `<tr><td colspan="3" class="empty">No office IPs added yet — attendance punching is unrestricted until you add one.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -1139,33 +1166,23 @@ function renderMyAttendance(){
 }
 
 async function punchAction(kind){
-  const today = new Date().toISOString().slice(0,10);
-  const now = new Date().toISOString();
-  let rec = DB.attendance.find(a=>a.date===today && a.empId===currentEmpId);
-
-  if(kind==="in"){
-    if(rec && rec.punchIn){ toast("You've already punched in today.", true); return; }
-    if(!rec){ rec = {id:newId("AT"), date:today, empId:currentEmpId, status:"Present", punchIn:now, punchOut:null}; DB.attendance.push(rec); }
-    else { rec.punchIn = now; if(!rec.id) rec.id = newId("AT"); }
-  } else {
-    if(!rec || !rec.punchIn){ toast("Punch in first.", true); return; }
-    if(rec.punchOut){ toast("You've already punched out today.", true); return; }
-    rec.punchOut = now;
-  }
-
   try{
-    // Direct row-level upsert (safe for many people punching at once) —
-    // does NOT touch the rest of the attendance table, unlike save("attendance").
-    const { error } = await sb.from("attendance").upsert(
-      { id: rec.id, date: rec.date, emp_id: rec.empId, status: rec.status||"Present", marked_at: rec.punchIn, punch_out: rec.punchOut },
-      { onConflict: "date,emp_id" }
-    );
-    if(error){ toast("Could not save: " + error.message, true); return; }
+    const { data, error } = await sb.functions.invoke("punch-attendance", { body: { kind } });
+    if(error){
+      console.error("Punch failed:", error);
+      toast("Could not punch " + kind + ": " + error.message + " — make sure the punch-attendance Edge Function is deployed.", true);
+      return;
+    }
+    if(data && data.error){
+      toast(data.error, true);
+      return;
+    }
     toast(kind==="in" ? "Punched in." : "Punched out.");
+    await loadDB();
     renderAll();
   }catch(e){
     console.error(e);
-    toast("Could not save: " + e.message, true);
+    toast("Could not punch " + kind + ": " + e.message, true);
   }
 }
 
@@ -1535,6 +1552,12 @@ function renderReports(){
 // ============================= TEAM (Admin only) =============================
 let teamMembers = [];
 let invitedUsers = [];
+let allowedIps = [];
+async function loadAllowedIps(){
+  const { data, error } = await sb.from("allowed_ips").select("*").order("label");
+  if(error){ console.error("Could not load allowed_ips:", error); allowedIps = []; return; }
+  allowedIps = data || [];
+}
 async function loadTeam(){
   const { data, error } = await sb.from("profiles").select("*").order("name");
   if(error){ toast("Could not load team: " + error.message, true); return; }
@@ -1666,6 +1689,41 @@ function attachHandlers(){
       await save("settings");
       toast("Settings saved.");
     };
+
+    document.getElementById("detectIpBtn").onclick = async ()=>{
+      const btn = document.getElementById("detectIpBtn");
+      btn.disabled = true; btn.textContent = "Detecting…";
+      try{
+        const res = await fetch("https://api.ipify.org?format=json");
+        const data = await res.json();
+        document.getElementById("ip_address").value = data.ip;
+        toast("Detected IP: " + data.ip + " — this is the device you're using right now, so make sure you're on office WiFi before adding it.");
+      }catch(e){
+        toast("Could not detect IP automatically. Search \"what is my IP\" while on office WiFi instead.", true);
+      }finally{
+        btn.disabled = false; btn.textContent = "Detect My Current IP";
+      }
+    };
+
+    document.getElementById("addIpBtn").onclick = async ()=>{
+      const ip = val("ip_address").trim();
+      if(!ip){ toast("Enter an IP address.", true); return; }
+      const { error } = await sb.from("allowed_ips").insert({ ip, label: val("ip_label").trim() || null });
+      if(error){ toast("Could not add IP: " + error.message, true); return; }
+      await loadAllowedIps();
+      toast("Office IP added.");
+      renderAll();
+    };
+
+    document.querySelectorAll(".delIpBtn").forEach(b=>b.onclick=async (e)=>{
+      const ip = e.target.closest("tr").dataset.ip;
+      if(!confirm("Remove this office IP? Employees on this network will no longer be able to punch in/out.")) return;
+      const { error } = await sb.from("allowed_ips").delete().eq("ip", ip);
+      if(error){ toast("Could not remove IP: " + error.message, true); return; }
+      await loadAllowedIps();
+      toast("Office IP removed.");
+      renderAll();
+    });
   }
 
   if(activeTab==="Employees"){
@@ -2210,7 +2268,7 @@ async function startApp(){
   document.getElementById("authScreen").style.display = "none";
   document.getElementById("appRoot").style.display = "block";
   await loadDB();
-  if(currentProfile.role === "Admin") await loadTeam();
+  if(currentProfile.role === "Admin"){ await loadTeam(); await loadAllowedIps(); }
   renderAll();
 }
 
