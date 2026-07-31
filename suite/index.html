@@ -203,6 +203,7 @@ let currentProfile = null; // {id, name, role, emp_id}
 const TABS = ["Dashboard","Settings","Employees","Payroll","Payments","Ledger","Payslip","Accounting","Attendance","Leaves","CRM","Reports","Team"];
 const ROLE_TABS = {
   "Admin": TABS,
+  "Director": TABS,
   "HR": ["Dashboard","Employees","Attendance","Leaves","Payroll","Payments","Payslip","Reports"],
   "Accounts": ["Dashboard","Settings","Payroll","Payments","Ledger","Payslip","Accounting","Reports"],
   "Sales": ["Dashboard","CRM","Reports"],
@@ -471,7 +472,7 @@ function renderRoleSelector(){
   if(label && currentProfile){
     label.textContent = currentProfile.name + " (" + currentProfile.role + ")";
   }
-  const isAdmin = currentProfile && currentProfile.role === "Admin";
+  const isAdmin = currentProfile && (currentProfile.role === "Admin" || currentProfile.role === "Director");
   const roleSelect = document.getElementById("roleSelect");
   if(roleSelect){
     roleSelect.innerHTML = Object.keys(ROLE_TABS).map(r=>`<option value="${r}" ${r===currentRole?'selected':''}>${r}</option>`).join("");
@@ -1170,7 +1171,14 @@ async function punchAction(kind){
     const { data, error } = await sb.functions.invoke("punch-attendance", { body: { kind } });
     if(error){
       console.error("Punch failed:", error);
-      toast("Could not punch " + kind + ": " + error.message + " — make sure the punch-attendance Edge Function is deployed.", true);
+      let detail = error.message;
+      if(error.context && typeof error.context.json === "function"){
+        try{
+          const body = await error.context.json();
+          if(body && body.error) detail = body.error;
+        }catch(_){ /* response wasn't JSON */ }
+      }
+      toast("Could not punch " + kind + ": " + detail, true);
       return;
     }
     if(data && data.error){
@@ -2275,7 +2283,7 @@ async function startApp(){
   document.getElementById("authScreen").style.display = "none";
   document.getElementById("appRoot").style.display = "block";
   await loadDB();
-  if(currentProfile.role === "Admin"){ await loadTeam(); await loadAllowedIps(); }
+  if(currentProfile.role === "Admin" || currentProfile.role === "Director"){ await loadTeam(); await loadAllowedIps(); }
   renderAll();
 }
 
