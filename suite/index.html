@@ -2110,7 +2110,14 @@ function attachHandlers(){
         });
         if(error){
           console.error("Create user failed:", error);
-          toast("Could not create user: " + error.message + " — make sure the admin-create-user Edge Function is deployed.", true);
+          let detail = error.message;
+          if(error.context && typeof error.context.json === "function"){
+            try{
+              const body = await error.context.json();
+              if(body && body.error) detail = body.error;
+            }catch(_){ /* response wasn't JSON */ }
+          }
+          toast("Could not create user: " + detail, true);
           return;
         }
         if(data && data.error){ toast("Could not create user: " + data.error, true); return; }
