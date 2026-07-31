@@ -1176,13 +1176,14 @@ async function punchAction(kind){
         try{
           const body = await error.context.json();
           if(body && body.error) detail = body.error;
+          if(body && body.detectedIp) detail += " (detected IP: " + body.detectedIp + ")";
         }catch(_){ /* response wasn't JSON */ }
       }
       toast("Could not punch " + kind + ": " + detail, true);
       return;
     }
     if(data && data.error){
-      toast(data.error, true);
+      toast(data.error + (data.detectedIp ? " (detected IP: " + data.detectedIp + ")" : ""), true);
       return;
     }
     toast(kind==="in" ? "Punched in." : "Punched out.");
