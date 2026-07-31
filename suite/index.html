@@ -203,6 +203,7 @@ let currentProfile = null; // {id, name, role, emp_id}
 const TABS = ["Dashboard","Settings","Employees","Payroll","Payments","Payslip","Accounting","Books","Attendance","Leaves","CRM","Reports","Team"];
 const ROLE_TABS = {
   "Admin": TABS,
+  "Director": TABS,
   "HR": ["Dashboard","Employees","Attendance","Leaves","Payroll","Payments","Payslip","Reports"],
   "Accounts": ["Dashboard","Settings","Payroll","Payments","Payslip","Accounting","Books","Reports"],
   "Sales": ["Dashboard","CRM","Reports"],
@@ -232,7 +233,8 @@ const DEFAULT_SETTINGS = {
   pfEmpPct:0.12, pfErPct:0.12, pfCeiling:15000,
   esiEmpPct:0.0075, esiErPct:0.0325, esiCeiling:21000,
   ptSlab1:7500, ptAmt1:0, ptSlab2:10000, ptAmt2:175, ptAmt3:200,
-  casualLeaveQuota:12, sickLeaveQuota:8, earnedLeaveQuota:15
+  casualLeaveQuota:12, sickLeaveQuota:8, earnedLeaveQuota:15,
+  officeLat: null, officeLng: null, officeRadiusM: 150
 };
 
 const SEED_EMPLOYEES = [
@@ -409,6 +411,19 @@ function toast(msg, isErr){
   setTimeout(()=>t.remove(), isErr ? 9000 : 3200);
 }
 
+// supabase-js only puts a generic "non-2xx status code" message on `error.message` —
+// the Edge Function's actual JSON error body is on `error.context` (a raw Response).
+async function extractFnError(error){
+  let detail = error.message;
+  if(error.context && typeof error.context.json === "function"){
+    try{
+      const body = await error.context.json();
+      if(body && body.error) detail = body.error;
+    }catch(_){ /* response wasn't JSON */ }
+  }
+  return detail;
+}
+
 // ============================= CALC ENGINE =============================
 function daysInMonth(y,m){ return new Date(y,m,0).getDate(); }
 
@@ -474,7 +489,7 @@ function renderRoleSelector(){
   if(label && currentProfile){
     label.textContent = currentProfile.name + " (" + currentProfile.role + ")";
   }
-  const isAdmin = currentProfile && currentProfile.role === "Admin";
+  const isAdmin = currentProfile && (currentProfile.role === "Admin" || currentProfile.role === "Director");
   const roleSelect = document.getElementById("roleSelect");
   if(roleSelect){
     roleSelect.innerHTML = Object.keys(ROLE_TABS).map(r=>`<option value="${r}" ${r===currentRole?'selected':''}>${r}</option>`).join("");
@@ -618,30 +633,17 @@ function renderSettings(){
     <button class="btn gold" id="saveSettingsBtn">Save Settings</button>
   </div>
   <div class="card">
-    <h2>Office Network (Attendance Restriction)</h2>
-    <div class="sub">Employees can only Punch In / Punch Out while their device's public IP matches one listed here. You (Admin) are never restricted — you can access from anywhere.</div>
+    <h2>Office Location (Attendance Restriction)</h2>
+    <div class="sub">Employees must enroll their fingerprint (on their own phone/laptop) and be within this radius of the office to Punch In/Out. You (Admin/Director) are never restricted — you can access from anywhere.</div>
     <p class="helptext">
-      <b>Important:</b> a website cannot detect WiFi network names for privacy reasons — this checks the device's <i>public IP address</i> instead.
-      That only works reliably if your office has a <b>fixed/static IP</b> from your ISP. If your office IP changes (common with regular
-      broadband), employees will be blocked until you update it here. Also note a determined employee could still bypass this with a VPN or
-      mobile hotspot — treat this as a policy control, not unbeatable security.
+      Stand at the office and click "Use My Current Location" to fill in the coordinates below, then Save Settings.
+      Employees enroll their own fingerprint from the Attendance tab — nothing to do here for that part.
     </p>
     <div class="row">
-      <div class="field" style="max-width:220px;"><label>IP Address</label><input id="ip_address" placeholder="e.g. 103.21.58.4"></div>
-      <div class="field" style="max-width:200px;"><label>Label</label><input id="ip_label" placeholder="e.g. Pune Office"></div>
-      <button class="btn ghost" id="detectIpBtn">Detect My Current IP</button>
-      <button class="btn gold" id="addIpBtn">Add IP</button>
-    </div>
-    <div class="tablewrap">
-      <table>
-        <thead><tr><th>IP Address</th><th>Label</th><th></th></tr></thead>
-        <tbody>${allowedIps.map(r=>`
-          <tr data-ip="${r.ip}">
-            <td>${r.ip}</td><td>${r.label||''}</td>
-            <td><button class="btn danger sm delIpBtn">Delete</button></td>
-          </tr>`).join("") || `<tr><td colspan="3" class="empty">No office IPs added yet — attendance punching is unrestricted until you add one.</td></tr>`}
-        </tbody>
-      </table>
+      <div class="field" style="max-width:200px;"><label>Latitude</label><input id="officeLat" placeholder="e.g. 18.5204" value="${s.officeLat ?? ''}"></div>
+      <div class="field" style="max-width:200px;"><label>Longitude</label><input id="officeLng" placeholder="e.g. 73.8567" value="${s.officeLng ?? ''}"></div>
+      <div class="field" style="max-width:160px;"><label>Radius (meters)</label><input id="officeRadiusM" type="number" placeholder="150" value="${s.officeRadiusM ?? 150}"></div>
+      <button class="btn ghost" id="useMyLocationBtn">Use My Current Location</button>
     </div>
   </div>`;
 }
@@ -1648,11 +1650,33 @@ function renderMyAttendance(){
       <p class="helptext">Done for today. Contact your Admin if this needs correcting.</p>`;
   }
 
+  const deviceRows = myDevices.map(d=>`
+    <tr data-cred="${d.credential_id}">
+      <td>${d.device_label || "Unnamed device"}</td>
+      <td>${new Date(d.created_at).toLocaleDateString()}</td>
+      <td><button class="btn danger sm removeDeviceBtn">Remove</button></td>
+    </tr>`).join("");
+
   return `
   <div class="card">
     <h2>My Attendance — ${today}</h2>
-    <div class="sub">Punch in when you start work, punch out when you finish.</div>
+    <div class="sub">Punch in when you start work, punch out when you finish. Requires your fingerprint and being at the office.</div>
+    ${myDevices.length === 0 ? `<p class="helptext">No fingerprint enrolled on this device yet — enroll it first.</p>` : ''}
     ${actionHtml}
+  </div>
+  <div class="card">
+    <h2>My Fingerprint Devices</h2>
+    <div class="sub">Enroll this device once (phone or laptop) to be able to punch in/out from it. You'll need at least one enrolled device.</div>
+    <div class="row">
+      <div class="field" style="max-width:220px;"><label>Device label (optional)</label><input id="fp_device_label" placeholder="e.g. My Phone"></div>
+      <button class="btn gold" id="enrollFpBtn">Enroll My Fingerprint</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Device</th><th>Enrolled</th><th></th></tr></thead>
+        <tbody>${deviceRows || `<tr><td colspan="3" class="empty">No devices enrolled yet.</td></tr>`}</tbody>
+      </table>
+    </div>
   </div>
   <div class="card">
     <h2>My Recent Attendance</h2>
@@ -1665,18 +1689,106 @@ function renderMyAttendance(){
   </div>`;
 }
 
-async function punchAction(kind){
+// ============================= WEBAUTHN HELPERS =============================
+function bufferToBase64url(buf){
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function base64urlToBuffer(b64url){
+  const pad = "=".repeat((4 - (b64url.length % 4)) % 4);
+  const base64 = (b64url + pad).replace(/-/g,"+").replace(/_/g,"/");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+function getCurrentPosition(){
+  return new Promise((resolve, reject)=>{
+    if(!navigator.geolocation){ reject(new Error("This browser doesn't support location.")); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>resolve(pos.coords),
+      (err)=>reject(new Error(err.message)),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  });
+}
+
+async function enrollFingerprint(){
+  const btn = document.getElementById("enrollFpBtn");
+  try{
+    if(btn){ btn.disabled = true; btn.textContent = "Enrolling…"; }
+    const { data: optData, error: optErr } = await sb.functions.invoke("webauthn-enroll-options", { body: {} });
+    if(optErr){ toast("Could not start enrollment: " + (await extractFnError(optErr)), true); return; }
+    if(optData && optData.error){ toast(optData.error, true); return; }
+
+    const options = optData.options;
+    const publicKey = {
+      ...options,
+      challenge: base64urlToBuffer(options.challenge),
+      user: { ...options.user, id: base64urlToBuffer(options.user.id) },
+      excludeCredentials: (options.excludeCredentials||[]).map(c=>({...c, id: base64urlToBuffer(c.id)})),
+    };
+
+    let credential;
+    try{
+      credential = await navigator.credentials.create({ publicKey });
+    }catch(e){
+      console.error("WebAuthn create failed:", e);
+      toast("Fingerprint enrollment failed or was cancelled: " + e.message, true);
+      return;
+    }
+
+    const responseJson = {
+      id: credential.id,
+      rawId: bufferToBase64url(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+        attestationObject: bufferToBase64url(credential.response.attestationObject),
+        transports: credential.response.getTransports ? credential.response.getTransports() : [],
+      },
+      clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+    };
+
+    const label = val("fp_device_label").trim() || null;
+    const { data, error } = await sb.functions.invoke("webauthn-enroll-verify", {
+      body: { response: responseJson, device_label: label }
+    });
+    if(error){ toast("Could not save fingerprint: " + (await extractFnError(error)), true); return; }
+    if(data && data.error){ toast(data.error, true); return; }
+
+    toast("Fingerprint enrolled on this device.");
+    await loadMyDevices();
+    renderAll();
+  }catch(e){
+    console.error(e);
+    toast("Could not enroll fingerprint: " + e.message, true);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = "Enroll My Fingerprint"; }
+  }
+}
+
+async function removeDevice(credentialId){
+  if(!confirm("Remove this device? You'll need to enroll again to punch in/out from it.")) return;
+  const { error } = await sb.from("webauthn_credentials").delete().eq("credential_id", credentialId);
+  if(error){ toast("Could not remove device: " + error.message, true); return; }
+  await loadMyDevices();
+  toast("Device removed.");
+  renderAll();
+}
+
+// Admins/Directors are never restricted — this calls the plain punch-attendance function.
+async function punchDirect(kind){
   try{
     const { data, error } = await sb.functions.invoke("punch-attendance", { body: { kind } });
     if(error){
       console.error("Punch failed:", error);
-      toast("Could not punch " + kind + ": " + error.message + " — make sure the punch-attendance Edge Function is deployed.", true);
+      toast("Could not punch " + kind + ": " + (await extractFnError(error)), true);
       return;
     }
-    if(data && data.error){
-      toast(data.error, true);
-      return;
-    }
+    if(data && data.error){ toast(data.error, true); return; }
     toast(kind==="in" ? "Punched in." : "Punched out.");
     await loadDB();
     renderAll();
@@ -1684,6 +1796,72 @@ async function punchAction(kind){
     console.error(e);
     toast("Could not punch " + kind + ": " + e.message, true);
   }
+}
+
+// Everyone else needs a fingerprint check (their own enrolled device) plus GPS proof
+// they're within office radius, both verified server-side in webauthn-punch-verify.
+async function punchWithFingerprint(kind){
+  try{
+    let coords;
+    try{
+      coords = await getCurrentPosition();
+    }catch(e){
+      toast("Could not get your location: " + e.message + " — location access is required to punch in/out.", true);
+      return;
+    }
+
+    const { data: optData, error: optErr } = await sb.functions.invoke("webauthn-punch-options", { body: {} });
+    if(optErr){ toast("Could not start fingerprint check: " + (await extractFnError(optErr)), true); return; }
+    if(optData && optData.error){ toast(optData.error, true); return; }
+
+    const options = optData.options;
+    const publicKey = {
+      ...options,
+      challenge: base64urlToBuffer(options.challenge),
+      allowCredentials: (options.allowCredentials||[]).map(c=>({...c, id: base64urlToBuffer(c.id)})),
+    };
+
+    let assertion;
+    try{
+      assertion = await navigator.credentials.get({ publicKey });
+    }catch(e){
+      console.error("WebAuthn get failed:", e);
+      toast("Fingerprint check failed or was cancelled: " + e.message, true);
+      return;
+    }
+
+    const responseJson = {
+      id: assertion.id,
+      rawId: bufferToBase64url(assertion.rawId),
+      type: assertion.type,
+      response: {
+        clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
+        authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
+        signature: bufferToBase64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : undefined,
+      },
+      clientExtensionResults: assertion.getClientExtensionResults ? assertion.getClientExtensionResults() : {},
+    };
+
+    const { data, error } = await sb.functions.invoke("webauthn-punch-verify", {
+      body: { kind, response: responseJson, lat: coords.latitude, lng: coords.longitude }
+    });
+    if(error){ toast("Could not punch " + kind + ": " + (await extractFnError(error)), true); return; }
+    if(data && data.error){ toast(data.error, true); return; }
+
+    toast(kind==="in" ? "Punched in." : "Punched out.");
+    await loadDB();
+    renderAll();
+  }catch(e){
+    console.error(e);
+    toast("Could not punch " + kind + ": " + e.message, true);
+  }
+}
+
+async function punchAction(kind){
+  const isPrivileged = currentProfile && (currentProfile.role === "Admin" || currentProfile.role === "Director");
+  if(isPrivileged) await punchDirect(kind);
+  else await punchWithFingerprint(kind);
 }
 
 // ============================= LEAVES =============================
@@ -2052,11 +2230,12 @@ function renderReports(){
 // ============================= TEAM (Admin only) =============================
 let teamMembers = [];
 let invitedUsers = [];
-let allowedIps = [];
-async function loadAllowedIps(){
-  const { data, error } = await sb.from("allowed_ips").select("*").order("label");
-  if(error){ console.error("Could not load allowed_ips:", error); allowedIps = []; return; }
-  allowedIps = data || [];
+let myDevices = [];
+async function loadMyDevices(){
+  const { data, error } = await sb.from("webauthn_credentials")
+    .select("credential_id, device_label, created_at").eq("profile_id", currentUser.id).order("created_at");
+  if(error){ console.error("Could not load fingerprint devices:", error); myDevices = []; return; }
+  myDevices = data || [];
 }
 async function loadTeam(){
   const { data, error } = await sb.from("profiles").select("*").order("name");
@@ -2184,46 +2363,33 @@ function attachHandlers(){
         pfEmpPct: parseFloat(val("pfEmpPct"))/100, pfErPct: parseFloat(val("pfErPct"))/100, pfCeiling: parseFloat(val("pfCeiling")),
         esiEmpPct: parseFloat(val("esiEmpPct"))/100, esiErPct: parseFloat(val("esiErPct"))/100, esiCeiling: parseFloat(val("esiCeiling")),
         ptSlab1: parseFloat(val("ptSlab1")), ptAmt1: parseFloat(val("ptAmt1")),
-        ptSlab2: parseFloat(val("ptSlab2")), ptAmt2: parseFloat(val("ptAmt2")), ptAmt3: parseFloat(val("ptAmt3"))
+        ptSlab2: parseFloat(val("ptSlab2")), ptAmt2: parseFloat(val("ptAmt2")), ptAmt3: parseFloat(val("ptAmt3")),
+        officeLat: val("officeLat").trim() ? parseFloat(val("officeLat")) : null,
+        officeLng: val("officeLng").trim() ? parseFloat(val("officeLng")) : null,
+        officeRadiusM: val("officeRadiusM").trim() ? parseFloat(val("officeRadiusM")) : 150
       };
       await save("settings");
       toast("Settings saved.");
     };
 
-    document.getElementById("detectIpBtn").onclick = async ()=>{
-      const btn = document.getElementById("detectIpBtn");
+    document.getElementById("useMyLocationBtn").onclick = ()=>{
+      if(!navigator.geolocation){ toast("Your browser doesn't support location.", true); return; }
+      const btn = document.getElementById("useMyLocationBtn");
       btn.disabled = true; btn.textContent = "Detecting…";
-      try{
-        const res = await fetch("https://api.ipify.org?format=json");
-        const data = await res.json();
-        document.getElementById("ip_address").value = data.ip;
-        toast("Detected IP: " + data.ip + " — this is the device you're using right now, so make sure you're on office WiFi before adding it.");
-      }catch(e){
-        toast("Could not detect IP automatically. Search \"what is my IP\" while on office WiFi instead.", true);
-      }finally{
-        btn.disabled = false; btn.textContent = "Detect My Current IP";
-      }
+      navigator.geolocation.getCurrentPosition(
+        (pos)=>{
+          document.getElementById("officeLat").value = pos.coords.latitude.toFixed(6);
+          document.getElementById("officeLng").value = pos.coords.longitude.toFixed(6);
+          toast("Location detected — make sure you're standing at the office, then Save Settings.");
+          btn.disabled = false; btn.textContent = "Use My Current Location";
+        },
+        (err)=>{
+          toast("Could not get your location: " + err.message, true);
+          btn.disabled = false; btn.textContent = "Use My Current Location";
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
     };
-
-    document.getElementById("addIpBtn").onclick = async ()=>{
-      const ip = val("ip_address").trim();
-      if(!ip){ toast("Enter an IP address.", true); return; }
-      const { error } = await sb.from("allowed_ips").insert({ ip, label: val("ip_label").trim() || null });
-      if(error){ toast("Could not add IP: " + error.message, true); return; }
-      await loadAllowedIps();
-      toast("Office IP added.");
-      renderAll();
-    };
-
-    document.querySelectorAll(".delIpBtn").forEach(b=>b.onclick=async (e)=>{
-      const ip = e.target.closest("tr").dataset.ip;
-      if(!confirm("Remove this office IP? Employees on this network will no longer be able to punch in/out.")) return;
-      const { error } = await sb.from("allowed_ips").delete().eq("ip", ip);
-      if(error){ toast("Could not remove IP: " + error.message, true); return; }
-      await loadAllowedIps();
-      toast("Office IP removed.");
-      renderAll();
-    });
   }
 
   if(activeTab==="Employees"){
@@ -2581,6 +2747,11 @@ function attachHandlers(){
       const outBtn = document.getElementById("punchOutBtn");
       if(inBtn) inBtn.onclick = ()=>punchAction("in");
       if(outBtn) outBtn.onclick = ()=>punchAction("out");
+      const enrollBtn = document.getElementById("enrollFpBtn");
+      if(enrollBtn) enrollBtn.onclick = enrollFingerprint;
+      document.querySelectorAll(".removeDeviceBtn").forEach(b=>b.onclick=(e)=>{
+        removeDevice(e.target.closest("tr").dataset.cred);
+      });
     } else {
       document.getElementById("loadAttBtn").onclick = ()=>{ attDate = val("attDateInput"); renderAll(); };
       document.getElementById("saveAttBtn").onclick = async ()=>{
@@ -2744,7 +2915,7 @@ function attachHandlers(){
         });
         if(error){
           console.error("Create user failed:", error);
-          toast("Could not create user: " + error.message + " — make sure the admin-create-user Edge Function is deployed.", true);
+          toast("Could not create user: " + (await extractFnError(error)), true);
           return;
         }
         if(data && data.error){ toast("Could not create user: " + data.error, true); return; }
@@ -2902,8 +3073,9 @@ async function startApp(){
   document.getElementById("authScreen").style.display = "none";
   document.getElementById("appRoot").style.display = "block";
   await loadDB();
-  if(currentProfile.role === "Admin"){ await loadTeam(); await loadAllowedIps(); }
+  if(currentProfile.role === "Admin" || currentProfile.role === "Director"){ await loadTeam(); }
   if(currentProfile.role !== "Employee"){ await loadAccountingData(); }
+  if(currentProfile.role === "Employee"){ await loadMyDevices(); }
   renderAll();
 }
 
