@@ -200,12 +200,11 @@ let currentUser = null;    // {id, email}
 let currentProfile = null; // {id, name, role, emp_id}
 
 // ============================= STATE =============================
-const TABS = ["Dashboard","Settings","Employees","Payroll","Payments","Ledger","Payslip","Accounting","Attendance","Leaves","CRM","Reports","Team"];
+const TABS = ["Dashboard","Settings","Employees","Payroll","Payments","Payslip","Accounting","Books","Attendance","Leaves","CRM","Reports","Team"];
 const ROLE_TABS = {
   "Admin": TABS,
-  "Director": TABS,
   "HR": ["Dashboard","Employees","Attendance","Leaves","Payroll","Payments","Payslip","Reports"],
-  "Accounts": ["Dashboard","Settings","Payroll","Payments","Ledger","Payslip","Accounting","Reports"],
+  "Accounts": ["Dashboard","Settings","Payroll","Payments","Payslip","Accounting","Books","Reports"],
   "Sales": ["Dashboard","CRM","Reports"],
   "Employee": ["Dashboard","Attendance"]
 };
@@ -223,7 +222,10 @@ let DB = {
   expenses: [],  // {id,date,category,description,amount,paidVia}
   attendance: [], // {date,empId,status}
   leaves: [],    // {id,empId,fromDate,toDate,type,reason,status}
-  leads: []      // {id,name,company,contact,stage,value,nextFollowUp,notes}
+  leads: [],     // {id,name,company,contact,stage,value,nextFollowUp,notes}
+  ledgerAccounts: [], // Chart of Accounts
+  vouchers: [],       // Sales/Purchase/Payment/Receipt/Journal/Contra
+  voucherLines: []    // double-entry Dr/Cr lines per voucher
 };
 
 const DEFAULT_SETTINGS = {
@@ -472,7 +474,7 @@ function renderRoleSelector(){
   if(label && currentProfile){
     label.textContent = currentProfile.name + " (" + currentProfile.role + ")";
   }
-  const isAdmin = currentProfile && (currentProfile.role === "Admin" || currentProfile.role === "Director");
+  const isAdmin = currentProfile && currentProfile.role === "Admin";
   const roleSelect = document.getElementById("roleSelect");
   if(roleSelect){
     roleSelect.innerHTML = Object.keys(ROLE_TABS).map(r=>`<option value="${r}" ${r===currentRole?'selected':''}>${r}</option>`).join("");
@@ -513,9 +515,9 @@ function renderAll(){
   else if(activeTab==="Employees") main.innerHTML = renderEmployees();
   else if(activeTab==="Payroll") main.innerHTML = renderPayroll();
   else if(activeTab==="Payments") main.innerHTML = renderPayments();
-  else if(activeTab==="Ledger") main.innerHTML = renderLedger();
   else if(activeTab==="Payslip") main.innerHTML = renderPayslip();
   else if(activeTab==="Accounting") main.innerHTML = renderAccounting();
+  else if(activeTab==="Books") main.innerHTML = renderBooks();
   else if(activeTab==="Attendance") main.innerHTML = renderAttendance();
   else if(activeTab==="Leaves") main.innerHTML = renderLeaves();
   else if(activeTab==="CRM") main.innerHTML = renderCRM();
@@ -794,86 +796,583 @@ function renderPayments(){
   </div>`;
 }
 
-// ============================= LEDGER =============================
-function buildLedgerEntries(){
-  const auto = [];
+// ============================= ACCOUNTING ENGINE =============================
+const SYS_ACCOUNTS = {
+  cash:"sys-cash", bank:"sys-bank", sales:"sys-sales", purchase:"sys-purchase",
+  gstPayable:"sys-gst-payable", gstInput:"sys-gst-input",
+  salaryExpense:"sys-salary-expense", pfErExpense:"sys-pf-er-expense", esiErExpense:"sys-esi-er-expense",
+  pfPayable:"sys-pf-payable", esiPayable:"sys-esi-payable", ptPayable:"sys-pt-payable",
+  tdsPayable:"sys-tds-payable", salaryPayable:"sys-salary-payable", capital:"sys-capital"
+};
+const SEED_CHART_OF_ACCOUNTS = [
+  {id:SYS_ACCOUNTS.cash, name:"Cash", acc_group:"Cash-in-Hand", nature:"Asset", is_system:true},
+  {id:SYS_ACCOUNTS.bank, name:"Bank Account", acc_group:"Bank Accounts", nature:"Asset", is_system:true},
+  {id:SYS_ACCOUNTS.sales, name:"Sales Account", acc_group:"Sales Accounts", nature:"Income", is_system:true},
+  {id:SYS_ACCOUNTS.purchase, name:"Purchase Account", acc_group:"Purchase Accounts", nature:"Expense", is_system:true},
+  {id:SYS_ACCOUNTS.gstPayable, name:"GST Payable (Output)", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.gstInput, name:"GST Input Credit", acc_group:"Duties & Taxes", nature:"Asset", is_system:true},
+  {id:SYS_ACCOUNTS.salaryExpense, name:"Salary Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
+  {id:SYS_ACCOUNTS.pfErExpense, name:"PF Employer Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
+  {id:SYS_ACCOUNTS.esiErExpense, name:"ESI Employer Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
+  {id:SYS_ACCOUNTS.pfPayable, name:"PF Payable", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.esiPayable, name:"ESI Payable", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.ptPayable, name:"Professional Tax Payable", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.tdsPayable, name:"TDS Payable", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.salaryPayable, name:"Salary Payable", acc_group:"Current Liabilities", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.capital, name:"Capital Account", acc_group:"Capital Account", nature:"Equity", is_system:true},
+  {id:"acc-rent", name:"Rent Expense", acc_group:"Indirect Expenses", nature:"Expense"},
+  {id:"acc-utilities", name:"Utilities Expense", acc_group:"Indirect Expenses", nature:"Expense"},
+  {id:"acc-travel", name:"Travel Expense", acc_group:"Indirect Expenses", nature:"Expense"},
+  {id:"acc-office", name:"Office Supplies Expense", acc_group:"Indirect Expenses", nature:"Expense"},
+  {id:"acc-marketing", name:"Marketing Expense", acc_group:"Indirect Expenses", nature:"Expense"},
+  {id:"acc-professional", name:"Professional Fees", acc_group:"Indirect Expenses", nature:"Expense"},
+  {id:"acc-software", name:"Software/Subscriptions Expense", acc_group:"Indirect Expenses", nature:"Expense"},
+  {id:"acc-misc-income", name:"Miscellaneous Income", acc_group:"Indirect Income", nature:"Income"}
+];
+const ACC_GROUPS_BY_NATURE = {
+  Asset: ["Cash-in-Hand","Bank Accounts","Sundry Debtors","Current Assets","Fixed Assets"],
+  Liability: ["Sundry Creditors","Duties & Taxes","Current Liabilities","Loans (Liability)"],
+  Equity: ["Capital Account","Reserves & Surplus"],
+  Income: ["Sales Accounts","Indirect Income"],
+  Expense: ["Purchase Accounts","Direct Expenses","Indirect Expenses"]
+};
+const VOUCHER_PREFIX = {Sales:"SAL", Purchase:"PUR", Payment:"PAY", Receipt:"REC", Journal:"JNL", Contra:"CTR"};
+
+function normalSign(nature){ return (nature==="Asset"||nature==="Expense") ? 1 : -1; }
+function accName(id){ const a = DB.ledgerAccounts.find(x=>x.id===id); return a ? a.name : id; }
+
+function getPayrollVirtualPostings(){
+  const out = [];
   distinctPeriods().forEach(({month,year})=>{
     const entries = DB.payroll.filter(p=>p.month===month&&p.year===year).map(computePayroll).filter(Boolean);
     if(!entries.length) return;
     const sum = k => entries.reduce((a,r)=>a+r[k],0);
     const label = monthName(month)+" "+year;
     const date = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth(year,month)).padStart(2,'0')}`;
-    auto.push({date, account:"Salary Expense", particulars:"Salary expense accrued for "+label, debit:sum("gross"), credit:0, source:"auto"});
-    auto.push({date, account:"PF Payable", particulars:"PF (employee share) withheld - "+label, debit:0, credit:sum("pfEmp"), source:"auto"});
-    auto.push({date, account:"ESI Payable", particulars:"ESI (employee share) withheld - "+label, debit:0, credit:sum("esiEmp"), source:"auto"});
-    auto.push({date, account:"PT Payable", particulars:"Professional Tax withheld - "+label, debit:0, credit:sum("pt"), source:"auto"});
-    auto.push({date, account:"TDS Payable", particulars:"TDS withheld - "+label, debit:0, credit:sum("tds"), source:"auto"});
-    auto.push({date, account:"Salary Payable", particulars:"Net salary payable to staff - "+label, debit:0, credit:sum("netPay"), source:"auto"});
-    auto.push({date, account:"PF Employer Expense", particulars:"Employer PF contribution - "+label, debit:sum("pfEr"), credit:0, source:"auto"});
-    auto.push({date, account:"ESI Employer Expense", particulars:"Employer ESI contribution - "+label, debit:sum("esiEr"), credit:0, source:"auto"});
-    auto.push({date, account:"PF Payable", particulars:"Employer PF contribution accrued - "+label, debit:0, credit:sum("pfEr"), source:"auto"});
-    auto.push({date, account:"ESI Payable", particulars:"Employer ESI contribution accrued - "+label, debit:0, credit:sum("esiEr"), source:"auto"});
+    const vno = "PAYROLL-"+month+"-"+year;
+    const push=(accountId,particulars,debit,credit)=>out.push({date,accountId,voucherType:"Journal",voucherNo:vno,voucherId:vno,particulars,partyId:null,debit,credit,isVirtual:true});
+    push(SYS_ACCOUNTS.salaryExpense, "Salary expense accrued - "+label, sum("gross"), 0);
+    push(SYS_ACCOUNTS.pfPayable, "PF (employee share) withheld - "+label, 0, sum("pfEmp"));
+    push(SYS_ACCOUNTS.esiPayable, "ESI (employee share) withheld - "+label, 0, sum("esiEmp"));
+    push(SYS_ACCOUNTS.ptPayable, "PT withheld - "+label, 0, sum("pt"));
+    push(SYS_ACCOUNTS.tdsPayable, "TDS withheld - "+label, 0, sum("tds"));
+    push(SYS_ACCOUNTS.salaryPayable, "Net salary payable - "+label, 0, sum("netPay"));
+    push(SYS_ACCOUNTS.pfErExpense, "Employer PF contribution - "+label, sum("pfEr"), 0);
+    push(SYS_ACCOUNTS.esiErExpense, "Employer ESI contribution - "+label, sum("esiEr"), 0);
+    push(SYS_ACCOUNTS.pfPayable, "Employer PF accrued - "+label, 0, sum("pfEr"));
+    push(SYS_ACCOUNTS.esiPayable, "Employer ESI accrued - "+label, 0, sum("esiEr"));
     const paidTotal = DB.payments.filter(p=>p.month===month&&p.year===year).reduce((a,p)=>a+(p.amountPaid||0),0);
     if(paidTotal>0){
-      auto.push({date, account:"Salary Payable", particulars:"Salary paid out to staff - "+label, debit:paidTotal, credit:0, source:"auto"});
-      auto.push({date, account:"Bank/Cash", particulars:"Salary paid out to staff - "+label, debit:0, credit:paidTotal, source:"auto"});
+      push(SYS_ACCOUNTS.salaryPayable, "Salary paid out - "+label, paidTotal, 0);
+      push(SYS_ACCOUNTS.bank, "Salary paid out - "+label, 0, paidTotal);
     }
   });
-  const manual = DB.ledgerManual.map(m=>({...m, source:"manual"}));
-  return [...auto, ...manual].sort((a,b)=>a.date.localeCompare(b.date));
+  return out;
 }
 
-function renderLedger(){
-  const entries = buildLedgerEntries();
-  const accounts = ["Salary Payable","PF Payable","ESI Payable","PT Payable","TDS Payable"];
-  const summary = accounts.map(acc=>{
-    const debit = entries.filter(e=>e.account===acc).reduce((a,e)=>a+e.debit,0);
-    const credit = entries.filter(e=>e.account===acc).reduce((a,e)=>a+e.credit,0);
-    return {acc, debit, credit, bal:credit-debit};
-  });
+function getAllPostings(){
+  const real = DB.voucherLines.map(l=>{
+    const v = DB.vouchers.find(x=>x.id===l.voucherId);
+    if(!v) return null;
+    return {date:v.date, accountId:l.accountId, voucherType:v.voucherType, voucherNo:v.voucherNo, voucherId:v.id,
+      particulars:(l.lineNarration||v.narration||''), partyId:v.partyId, debit:l.debit||0, credit:l.credit||0, isVirtual:false};
+  }).filter(Boolean);
+  return [...real, ...getPayrollVirtualPostings()].sort((a,b)=>a.date.localeCompare(b.date));
+}
 
-  // running balance per account, in entry order
-  const balances = {};
-  const ledgerRows = entries.map(e=>{
-    balances[e.account] = (balances[e.account]||0) + e.credit - e.debit;
-    const actions = e.source==="manual"
-      ? `<button class="btn ghost sm editLedgerBtn" data-id="${e.id}">Edit</button><button class="btn danger sm delLedgerBtn" data-id="${e.id}">Delete</button>`
-      : `<span class="helptext">auto</span>`;
-    return `<tr><td>${e.date}</td><td>${e.account}</td><td>${e.particulars}</td><td class="num">${e.debit?fmt(e.debit):''}</td><td class="num">${e.credit?fmt(e.credit):''}</td><td class="num"><b>${fmt(balances[e.account])}</b></td><td class="actions">${actions}</td></tr>`;
-  }).join("");
+function accountBalance(accountId, asOfDate){
+  const acc = DB.ledgerAccounts.find(a=>a.id===accountId);
+  if(!acc) return 0;
+  const sign = normalSign(acc.nature);
+  let drMinusCr = (acc.openingBalanceType==="Dr"?1:-1) * (acc.openingBalance||0);
+  getAllPostings().forEach(p=>{
+    if(p.accountId!==accountId) return;
+    if(asOfDate && p.date>asOfDate) return;
+    drMinusCr += (p.debit||0) - (p.credit||0);
+  });
+  return sign * drMinusCr;
+}
+
+function computePnL(month, year){
+  const totalDays = daysInMonth(year, month);
+  const from = `${year}-${String(month).padStart(2,'0')}-01`;
+  const to = `${year}-${String(month).padStart(2,'0')}-${String(totalDays).padStart(2,'0')}`;
+  const r = pnlForRange(from, to);
+  return { revenue:r.incomeTotal, expenseTotal:r.expenseTotal, salaryExpense:0, totalExpense:r.expenseTotal, netProfit:r.netProfit };
+}
+function pnlForRange(fromDate, toDate){
+  const postings = getAllPostings().filter(p=>p.date>=fromDate && p.date<=toDate);
+  const byAccount = (accs, dir) => accs.reduce((sum,acc)=>{
+    const amt = postings.filter(p=>p.accountId===acc.id).reduce((a,p)=> a + dir*(p.debit-p.credit), 0);
+    return sum + amt;
+  }, 0);
+  const incomeAccounts = DB.ledgerAccounts.filter(a=>a.nature==="Income");
+  const expenseAccounts = DB.ledgerAccounts.filter(a=>a.nature==="Expense");
+  const incomeTotal = byAccount(incomeAccounts, -1);
+  const expenseTotal = byAccount(expenseAccounts, 1);
+  return { incomeTotal, expenseTotal, netProfit: incomeTotal - expenseTotal, incomeAccounts, expenseAccounts, postings };
+}
+
+function nextVoucherNo(type){
+  const prefix = VOUCHER_PREFIX[type] || "VCH";
+  const count = DB.vouchers.filter(v=>v.voucherType===type).length + 1;
+  return prefix + "-" + String(count).padStart(4,"0");
+}
+
+async function loadAccountingData(){
+  try{
+    const { data: accs, error: aErr } = await sb.from("ledger_accounts").select("*");
+    if(aErr){ toast("Could not load Chart of Accounts: " + aErr.message, true); DB.ledgerAccounts = []; }
+    else DB.ledgerAccounts = (accs||[]).map(r=>({id:r.id,name:r.name,accGroup:r.acc_group,nature:r.nature,isParty:r.is_party,
+      partyType:r.party_type,openingBalance:Number(r.opening_balance),openingBalanceType:r.opening_balance_type,
+      isSystem:r.is_system,gstin:r.gstin,contact:r.contact}));
+
+    if(DB.ledgerAccounts.length===0){
+      const rows = SEED_CHART_OF_ACCOUNTS.map(a=>({id:a.id,name:a.name,acc_group:a.acc_group,nature:a.nature,
+        is_party:false,opening_balance:0,opening_balance_type:"Dr",is_system:a.is_system||false}));
+      const { error } = await sb.from("ledger_accounts").insert(rows);
+      if(!error) DB.ledgerAccounts = SEED_CHART_OF_ACCOUNTS.map(a=>({id:a.id,name:a.name,accGroup:a.acc_group,nature:a.nature,
+        isParty:false,partyType:null,openingBalance:0,openingBalanceType:"Dr",isSystem:a.is_system||false}));
+      else toast("Could not seed Chart of Accounts: " + error.message, true);
+    }
+
+    const { data: vouchers, error: vErr } = await sb.from("vouchers").select("*");
+    if(vErr) toast("Could not load vouchers: " + vErr.message, true);
+    DB.vouchers = (vouchers||[]).map(r=>({id:r.id,voucherType:r.voucher_type,voucherNo:r.voucher_no,date:r.date,
+      partyId:r.party_id,narration:r.narration,reference:r.reference}));
+
+    const { data: lines, error: lErr } = await sb.from("voucher_lines").select("*");
+    if(lErr) toast("Could not load voucher lines: " + lErr.message, true);
+    DB.voucherLines = (lines||[]).map(r=>({id:r.id,voucherId:r.voucher_id,accountId:r.account_id,
+      debit:Number(r.debit),credit:Number(r.credit),lineNarration:r.line_narration}));
+  }catch(e){
+    console.error(e);
+    toast("Could not load accounting data: " + e.message, true);
+  }
+}
+
+async function saveVoucher(voucher, lines){
+  const cleanLines = lines.filter(l=>(l.debit||0)>0 || (l.credit||0)>0);
+  const totalDr = cleanLines.reduce((a,l)=>a+(l.debit||0),0);
+  const totalCr = cleanLines.reduce((a,l)=>a+(l.credit||0),0);
+  if(cleanLines.length < 2){ toast("A voucher needs at least two line entries.", true); return false; }
+  if(Math.abs(totalDr-totalCr) > 0.01){ toast(`Voucher does not balance — Dr ${fmt(totalDr)} vs Cr ${fmt(totalCr)}.`, true); return false; }
+  try{
+    const { error: vErr } = await sb.from("vouchers").insert({
+      id:voucher.id, voucher_type:voucher.voucherType, voucher_no:voucher.voucherNo, date:voucher.date,
+      party_id:voucher.partyId||null, narration:voucher.narration||null, reference:voucher.reference||null,
+      created_by:currentUser.id
+    });
+    if(vErr){ toast("Could not save voucher: " + vErr.message, true); return false; }
+    const lineRows = cleanLines.map(l=>({
+      id:newId("VL"), voucher_id:voucher.id, account_id:l.accountId, debit:l.debit||0, credit:l.credit||0,
+      line_narration:l.lineNarration||null
+    }));
+    const { error: lErr } = await sb.from("voucher_lines").insert(lineRows);
+    if(lErr){ toast("Could not save voucher lines: " + lErr.message, true); return false; }
+    DB.vouchers.push({id:voucher.id, voucherType:voucher.voucherType, voucherNo:voucher.voucherNo, date:voucher.date,
+      partyId:voucher.partyId, narration:voucher.narration, reference:voucher.reference});
+    lineRows.forEach(r=>DB.voucherLines.push({id:r.id, voucherId:r.voucher_id, accountId:r.account_id,
+      debit:r.debit, credit:r.credit, lineNarration:r.line_narration}));
+    return true;
+  }catch(e){ console.error(e); toast("Could not save voucher: " + e.message, true); return false; }
+}
+
+async function deleteVoucher(voucherId){
+  try{
+    const { error: lErr } = await sb.from("voucher_lines").delete().eq("voucher_id", voucherId);
+    if(lErr){ toast("Could not delete: " + lErr.message, true); return; }
+    const { error: vErr } = await sb.from("vouchers").delete().eq("id", voucherId);
+    if(vErr){ toast("Could not delete: " + vErr.message, true); return; }
+    DB.voucherLines = DB.voucherLines.filter(l=>l.voucherId!==voucherId);
+    DB.vouchers = DB.vouchers.filter(v=>v.id!==voucherId);
+    toast("Voucher deleted.");
+  }catch(e){ console.error(e); toast("Could not delete: " + e.message, true); }
+}
+
+function ageParty(accountId, asOfDate){
+  const acc = DB.ledgerAccounts.find(a=>a.id===accountId);
+  if(!acc) return {buckets:[0,0,0,0], total:0};
+  const increaseOnDebit = acc.nature === "Asset"; // Debtors are Asset (increase on Dr); Creditors are Liability (increase on Cr)
+  const postings = getAllPostings().filter(p=>p.accountId===accountId && (!asOfDate || p.date<=asOfDate)).sort((a,b)=>a.date.localeCompare(b.date));
+  const increases = []; // {date, remaining}
+  let decreaseQueue = 0;
+  postings.forEach(p=>{
+    const incAmt = increaseOnDebit ? p.debit : p.credit;
+    const decAmt = increaseOnDebit ? p.credit : p.debit;
+    if(incAmt>0) increases.push({date:p.date, remaining:incAmt});
+    if(decAmt>0){
+      let toClear = decAmt;
+      for(const inc of increases){
+        if(toClear<=0) break;
+        const clear = Math.min(inc.remaining, toClear);
+        inc.remaining -= clear; toClear -= clear;
+      }
+    }
+  });
+  const ref = asOfDate ? new Date(asOfDate) : new Date();
+  const buckets = [0,0,0,0]; // 0-30, 31-60, 61-90, 90+
+  let total = 0;
+  increases.forEach(inc=>{
+    if(inc.remaining<=0.01) return;
+    const days = Math.floor((ref - new Date(inc.date+"T00:00:00")) / 86400000);
+    const idx = days<=30?0 : days<=60?1 : days<=90?2 : 3;
+    buckets[idx] += inc.remaining;
+    total += inc.remaining;
+  });
+  return {buckets, total};
+}
+
+// ============================= BOOKS (Chart of Accounts, Vouchers, Reports) =============================
+let booksView = "vouchers";
+let voucherType = "Sales";
+let journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
+let booksDayRange = null;
+let booksAsOf = null;
+let booksPnlRange = null;
+let booksPartyId = null;
+
+function flatGroups(){
+  return Object.entries(ACC_GROUPS_BY_NATURE).flatMap(([nature, groups]) => groups.map(g => ({nature, group: g})));
+}
+function accountsByGroup(groupNames){
+  return DB.ledgerAccounts.filter(a=>groupNames.includes(a.accGroup));
+}
+function parties(type){
+  return DB.ledgerAccounts.filter(a=>a.isParty && a.partyType===type);
+}
+function cashBankAccounts(){
+  return DB.ledgerAccounts.filter(a=>["Cash-in-Hand","Bank Accounts"].includes(a.accGroup));
+}
+function incomeExpenseAccounts(nature){
+  return DB.ledgerAccounts.filter(a=>a.nature===nature && !a.isParty);
+}
+
+function renderBooks(){
+  const views = [["vouchers","Vouchers"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
+  const nav = `<div class="row" style="margin-bottom:14px;">${views.map(([k,l])=>
+    `<button class="btn ${booksView===k?'gold':'ghost'} sm booksNavBtn" data-view="${k}">${l}</button>`).join("")}</div>`;
+
+  let body;
+  if(booksView==="accounts") body = renderChartOfAccounts();
+  else if(booksView==="parties") body = renderPartyLedgers();
+  else if(booksView==="trial") body = renderTrialBalance();
+  else if(booksView==="pnl") body = renderBooksPnl();
+  else if(booksView==="balance") body = renderBalanceSheet();
+  else body = renderVouchersView();
+
+  return nav + body;
+}
+
+// ---- Chart of Accounts ----
+function renderChartOfAccounts(){
+  const rows = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name)).map(a=>`
+    <tr data-id="${a.id}">
+      <td>${a.name}</td><td>${a.accGroup}</td><td>${a.nature}</td>
+      <td>${a.isParty ? (a.partyType||'Party') : ''}</td>
+      <td class="num">${fmt(accountBalance(a.id))} ${a.nature==="Asset"||a.nature==="Expense"?'Dr':'Cr'}</td>
+      <td>${a.isSystem ? '<span class="helptext">system</span>' : `<button class="btn danger sm delAccBtn">Delete</button>`}</td>
+    </tr>`).join("");
 
   return `
   <div class="card">
-    <h2>Account Summary</h2>
-    <div class="sub">Live outstanding balances — what you still owe.</div>
+    <h2>Chart of Accounts</h2>
+    <div class="sub">Every ledger account in your books. System accounts (Cash, Bank, Sales, statutory payables) can't be deleted since Payroll and core vouchers depend on them.</div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Account</th><th>Total Debit</th><th>Total Credit</th><th>Balance Payable</th></tr></thead>
-        <tbody>${summary.map(s=>`<tr><td>${s.acc}</td><td class="num">${fmt(s.debit)}</td><td class="num">${fmt(s.credit)}</td><td class="num"><b>${fmt(s.bal)}</b></td></tr>`).join("")}</tbody>
+        <thead><tr><th>Name</th><th>Group</th><th>Nature</th><th>Party Type</th><th>Current Balance</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
     </div>
+    <div class="section-title">Add Account</div>
+    <div class="grid grid-4">
+      <div class="field"><label>Name</label><input id="acc_name" placeholder="e.g. Electricity Expense"></div>
+      <div class="field"><label>Group</label>
+        <select id="acc_group">${flatGroups().map(g=>`<option value="${g.nature}|${g.group}">${g.group} (${g.nature})</option>`).join("")}</select>
+      </div>
+      <div class="field"><label>Is this a Party (Customer/Vendor)?</label>
+        <select id="acc_isparty"><option value="">No</option><option value="Debtor">Yes — Customer (Debtor)</option><option value="Creditor">Yes — Vendor (Creditor)</option></select>
+      </div>
+      <div class="field"><label>Opening Balance (₹)</label><input type="number" id="acc_opening" value="0"></div>
+    </div>
+    <button class="btn gold" id="addAccBtn">Add Account</button>
+  </div>`;
+}
+
+// ---- Vouchers (entry + Day Book) ----
+function renderVouchersView(){
+  if(!booksDayRange){ const r = quickRange("month"); booksDayRange = {from:r.from, to:r.to}; }
+  const types = ["Sales","Purchase","Payment","Receipt","Journal","Contra"];
+
+  let form;
+  if(voucherType==="Sales") form = voucherFormSalesPurchase("Sales");
+  else if(voucherType==="Purchase") form = voucherFormSalesPurchase("Purchase");
+  else if(voucherType==="Payment") form = voucherFormPaymentReceipt("Payment");
+  else if(voucherType==="Receipt") form = voucherFormPaymentReceipt("Receipt");
+  else if(voucherType==="Contra") form = voucherFormContra();
+  else form = voucherFormJournal();
+
+  const dayRows = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
+    .sort((a,b)=>b.date.localeCompare(a.date)).map(v=>{
+      const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
+      const total = lines.reduce((a,l)=>a+(l.debit||0),0);
+      return `<tr data-id="${v.id}">
+        <td>${v.date}</td><td>${v.voucherNo}</td><td>${v.voucherType}</td>
+        <td>${v.partyId?accName(v.partyId):''}</td><td>${v.narration||''}</td>
+        <td class="num">${fmt(total)}</td>
+        <td><button class="btn danger sm delVoucherBtn">Delete</button></td>
+      </tr>`;
+    }).join("");
+
+  return `
+  <div class="card">
+    <h2>New Voucher</h2>
+    <div class="row" style="margin-bottom:10px;">
+      ${types.map(t=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}">${t}</button>`).join("")}
+    </div>
+    ${form}
   </div>
   <div class="card">
-    <h2>Ledger Entries</h2>
-    <div class="sub">Accrual entries generate automatically from Payroll + Payments (marked "auto", not editable here). Manual entries — like actual PF/ESI/PT/TDS deposits — can be added, edited, and deleted below.</div>
-    <div class="tablewrap" style="max-height:420px;overflow-y:auto;">
+    <h2>Day Book</h2>
+    <div class="row">
+      <div class="field" style="max-width:160px;"><label>From</label><input type="date" id="db_from" value="${booksDayRange.from}"></div>
+      <div class="field" style="max-width:160px;"><label>To</label><input type="date" id="db_to" value="${booksDayRange.to}"></div>
+      <button class="btn ghost" id="loadDayBookBtn">Apply</button>
+    </div>
+    <div class="tablewrap">
       <table>
-        <thead><tr><th>Date</th><th>Account</th><th>Particulars</th><th>Debit</th><th>Credit</th><th>Balance</th><th></th></tr></thead>
-        <tbody>${ledgerRows || `<tr><td colspan="7" class="empty">No entries yet — run payroll first.</td></tr>`}</tbody>
+        <thead><tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Narration</th><th>Amount</th><th></th></tr></thead>
+        <tbody>${dayRows || `<tr><td colspan="7" class="empty">No vouchers in this range.</td></tr>`}</tbody>
       </table>
     </div>
-    <div class="section-title" id="lgFormTitle">Add Manual Entry</div>
-    <input type="hidden" id="lg_editing_id" value="">
+  </div>`;
+}
+
+function voucherFormSalesPurchase(type){
+  const isSales = type==="Sales";
+  const partyList = parties(isSales?"Debtor":"Creditor");
+  const acctList = isSales ? incomeExpenseAccounts("Income") : incomeExpenseAccounts("Expense");
+  const defaultAcc = isSales ? SYS_ACCOUNTS.sales : SYS_ACCOUNTS.purchase;
+  return `
     <div class="grid grid-4">
-      <div class="field"><label>Date</label><input type="date" id="lg_date"></div>
-      <div class="field"><label>Account</label>
-        <select id="lg_account">${["Salary Expense","PF Employer Expense","ESI Employer Expense","Salary Payable","PF Payable","ESI Payable","PT Payable","TDS Payable","Bank/Cash"].map(a=>`<option>${a}</option>`).join("")}</select>
+      <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>${isSales?"Customer":"Vendor"}</label>
+        <select id="v_party">${partyList.map(p=>`<option value="${p.id}">${p.name}</option>`).join("") || `<option value="">— add one in Chart of Accounts first —</option>`}</select>
       </div>
-      <div class="field"><label>Debit (₹)</label><input type="number" id="lg_debit" value="0"></div>
-      <div class="field"><label>Credit (₹)</label><input type="number" id="lg_credit" value="0"></div>
+      <div class="field"><label>${isSales?"Sales":"Expense/Purchase"} Account</label>
+        <select id="v_account">${acctList.map(a=>`<option value="${a.id}" ${a.id===defaultAcc?'selected':''}>${a.name}</option>`).join("")}</select>
+      </div>
+      <div class="field"><label>Amount (₹, excl. GST)</label><input type="number" id="v_amount" value="0"></div>
+      <div class="field"><label>GST %</label><input type="number" id="v_gst" value="18"></div>
+      <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
     </div>
-    <div class="field"><label>Particulars</label><input id="lg_particulars" placeholder="e.g. PF deposited to EPFO for July 2026"></div>
-    <div class="row"><button class="btn gold" id="addLedgerBtn">Add Entry</button><button class="btn ghost" id="cancelLedgerBtn" style="display:none;">Cancel Edit</button></div>
+    <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
+}
+
+function voucherFormPaymentReceipt(type){
+  const isPayment = type==="Payment";
+  const partyList = parties(isPayment?"Creditor":"Debtor");
+  const otherAccts = isPayment ? incomeExpenseAccounts("Expense") : incomeExpenseAccounts("Income");
+  return `
+    <div class="grid grid-4">
+      <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>${isPayment?"Pay From":"Receive Into"}</label>
+        <select id="v_cashbank">${cashBankAccounts().map(a=>`<option value="${a.id}">${a.name}</option>`).join("")}</select>
+      </div>
+      <div class="field"><label>${isPayment?"Pay To":"Receive From"}</label>
+        <select id="v_target">
+          <optgroup label="${isPayment?'Vendors (settle a payable)':'Customers (settle a receivable)'}">
+            ${partyList.map(p=>`<option value="party:${p.id}">${p.name}</option>`).join("")}
+          </optgroup>
+          <optgroup label="${isPayment?'Direct Expense':'Direct Income'}">
+            ${otherAccts.map(a=>`<option value="acct:${a.id}">${a.name}</option>`).join("")}
+          </optgroup>
+        </select>
+      </div>
+      <div class="field"><label>Amount (₹)</label><input type="number" id="v_amount" value="0"></div>
+      <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
+    </div>
+    <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
+}
+
+function voucherFormContra(){
+  const cb = cashBankAccounts();
+  return `
+    <div class="grid grid-4">
+      <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>From</label><select id="v_from">${cb.map(a=>`<option value="${a.id}">${a.name}</option>`).join("")}</select></div>
+      <div class="field"><label>To</label><select id="v_to">${cb.map(a=>`<option value="${a.id}">${a.name}</option>`).join("")}</select></div>
+      <div class="field"><label>Amount (₹)</label><input type="number" id="v_amount" value="0"></div>
+      <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
+    </div>
+    <button class="btn gold" id="saveVoucherBtn" data-kind="Contra">Save Contra Voucher</button>`;
+}
+
+function voucherFormJournal(){
+  const totalDr = journalRows.reduce((a,r)=>a+(parseFloat(r.debit)||0),0);
+  const totalCr = journalRows.reduce((a,r)=>a+(parseFloat(r.credit)||0),0);
+  const rows = journalRows.map((r,i)=>`
+    <tr>
+      <td><select class="jrAccount" data-i="${i}">${DB.ledgerAccounts.map(a=>`<option value="${a.id}" ${a.id===r.account?'selected':''}>${a.name}</option>`).join("")}</select></td>
+      <td><input type="number" class="jrDebit" data-i="${i}" value="${r.debit||0}"></td>
+      <td><input type="number" class="jrCredit" data-i="${i}" value="${r.credit||0}"></td>
+      <td><button class="btn danger sm jrRemoveBtn" data-i="${i}">Remove</button></td>
+    </tr>`).join("");
+  return `
+    <div class="grid grid-2">
+      <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>Narration</label><input id="v_narration" placeholder="e.g. Correction / adjustment"></div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Account</th><th>Debit</th><th>Credit</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td><b>Total</b></td><td class="num"><b>${fmt(totalDr)}</b></td><td class="num"><b>${fmt(totalCr)}</b></td>
+          <td>${Math.abs(totalDr-totalCr)<0.01 ? '<span class="pill ok">Balanced</span>' : '<span class="pill warn">Not Balanced</span>'}</td></tr></tfoot>
+      </table>
+    </div>
+    <div class="row">
+      <button class="btn ghost sm" id="jrAddRowBtn">+ Add Row</button>
+      <button class="btn gold" id="saveVoucherBtn" data-kind="Journal">Save Journal Voucher</button>
+    </div>`;
+}
+
+// ---- Party Ledgers ----
+function renderPartyLedgers(){
+  const debtors = parties("Debtor"), creditors = parties("Creditor");
+  const partyRow = p => {
+    const bal = accountBalance(p.id);
+    const age = ageParty(p.id);
+    return `<tr><td>${p.name}</td><td class="num">${fmt(bal)}</td>
+      <td class="num">${fmt(age.buckets[0])}</td><td class="num">${fmt(age.buckets[1])}</td>
+      <td class="num">${fmt(age.buckets[2])}</td><td class="num">${fmt(age.buckets[3])}</td></tr>`;
+  };
+  const partyOptions = [...debtors,...creditors].map(p=>`<option value="${p.id}" ${p.id===booksPartyId?'selected':''}>${p.name}</option>`).join("");
+
+  let detail = "";
+  if(booksPartyId){
+    const postings = getAllPostings().filter(p=>p.accountId===booksPartyId);
+    let running = 0;
+    const rows = postings.map(p=>{ running += (p.debit||0)-(p.credit||0); return `<tr><td>${p.date}</td><td>${p.voucherNo}</td><td>${p.particulars}</td><td class="num">${p.debit?fmt(p.debit):''}</td><td class="num">${p.credit?fmt(p.credit):''}</td><td class="num">${fmt(running)}</td></tr>`; }).join("");
+    detail = `<div class="card"><h2>Ledger — ${accName(booksPartyId)}</h2>
+      <div class="tablewrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="empty">No transactions yet.</td></tr>`}</tbody></table></div></div>`;
+  }
+
+  return `
+  <div class="card">
+    <h2>Sundry Debtors (Customers who owe you)</h2>
+    <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
+    <tbody>${debtors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet.</td></tr>`}</tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>Sundry Creditors (Vendors you owe)</h2>
+    <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
+    <tbody>${creditors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet.</td></tr>`}</tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>View a Party's Full Ledger</h2>
+    <div class="row"><select id="partySelect" style="max-width:280px;"><option value="">Select a party…</option>${partyOptions}</select></div>
+  </div>
+  ${detail}`;
+}
+
+// ---- Trial Balance ----
+function renderTrialBalance(){
+  if(!booksAsOf) booksAsOf = new Date().toISOString().slice(0,10);
+  const rows = DB.ledgerAccounts.map(a=>{
+    const bal = accountBalance(a.id, booksAsOf);
+    const isDrNature = a.nature==="Asset"||a.nature==="Expense";
+    const dr = (isDrNature ? bal>=0 : bal<0) ? Math.abs(bal) : 0;
+    const cr = (isDrNature ? bal<0 : bal>=0) ? Math.abs(bal) : 0;
+    return {a, dr, cr};
+  }).filter(r=>r.dr>0.004 || r.cr>0.004);
+  const totalDr = rows.reduce((a,r)=>a+r.dr,0), totalCr = rows.reduce((a,r)=>a+r.cr,0);
+  return `
+  <div class="card">
+    <h2>Trial Balance</h2>
+    <div class="row"><div class="field" style="max-width:180px;"><label>As of</label><input type="date" id="tb_asof" value="${booksAsOf}"></div>
+      <button class="btn ghost" id="loadTrialBtn">Apply</button></div>
+    <div class="tablewrap">
+      <table><thead><tr><th>Account</th><th>Group</th><th>Debit</th><th>Credit</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr><td>${r.a.name}</td><td>${r.a.accGroup}</td><td class="num">${r.dr?fmt(r.dr):''}</td><td class="num">${r.cr?fmt(r.cr):''}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td colspan="2"><b>Total</b></td><td class="num"><b>${fmt(totalDr)}</b></td><td class="num"><b>${fmt(totalCr)}</b></td></tr></tfoot>
+      </table>
+    </div>
+    <p class="helptext" style="margin-top:8px;">${Math.abs(totalDr-totalCr)<0.01 ? '<span class="pill ok">Balanced</span>' : '<span class="pill warn">Not Balanced — this should not happen; check for a data issue</span>'}</p>
+  </div>`;
+}
+
+// ---- Profit & Loss (Books) ----
+function renderBooksPnl(){
+  if(!booksPnlRange){ const r = quickRange("month"); booksPnlRange = {from:r.from, to:r.to}; }
+  const r = pnlForRange(booksPnlRange.from, booksPnlRange.to);
+  const incRows = r.incomeAccounts.map(a=>{
+    const amt = r.postings.filter(p=>p.accountId===a.id).reduce((s,p)=>s+(p.credit-p.debit),0);
+    return {a, amt};
+  }).filter(x=>Math.abs(x.amt)>0.004);
+  const expRows = r.expenseAccounts.map(a=>{
+    const amt = r.postings.filter(p=>p.accountId===a.id).reduce((s,p)=>s+(p.debit-p.credit),0);
+    return {a, amt};
+  }).filter(x=>Math.abs(x.amt)>0.004);
+  return `
+  <div class="card">
+    <h2>Profit &amp; Loss</h2>
+    <div class="row">
+      <div class="field" style="max-width:160px;"><label>From</label><input type="date" id="pnl_from" value="${booksPnlRange.from}"></div>
+      <div class="field" style="max-width:160px;"><label>To</label><input type="date" id="pnl_to" value="${booksPnlRange.to}"></div>
+      <button class="btn ghost" id="loadPnlBtn">Apply</button>
+    </div>
+    <div class="grid grid-3">
+      <div class="stat"><div class="lbl">Total Income</div><div class="val">₹${fmt0(r.incomeTotal)}</div></div>
+      <div class="stat"><div class="lbl">Total Expense</div><div class="val">₹${fmt0(r.expenseTotal)}</div></div>
+      <div class="stat"><div class="lbl">Net Profit</div><div class="val" style="color:${r.netProfit>=0?'var(--ok)':'var(--danger)'}">₹${fmt0(r.netProfit)}</div></div>
+    </div>
+    <div class="grid grid-2">
+      <div class="tablewrap"><table><thead><tr><th>Income</th><th>Amount</th></tr></thead>
+        <tbody>${incRows.map(x=>`<tr><td>${x.a.name}</td><td class="num">${fmt(x.amt)}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">No income in this range.</td></tr>`}</tbody></table></div>
+      <div class="tablewrap"><table><thead><tr><th>Expense</th><th>Amount</th></tr></thead>
+        <tbody>${expRows.map(x=>`<tr><td>${x.a.name}</td><td class="num">${fmt(x.amt)}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">No expenses in this range.</td></tr>`}</tbody></table></div>
+    </div>
+  </div>`;
+}
+
+// ---- Balance Sheet ----
+function renderBalanceSheet(){
+  if(!booksAsOf) booksAsOf = new Date().toISOString().slice(0,10);
+  const assets = DB.ledgerAccounts.filter(a=>a.nature==="Asset").map(a=>({a, bal:accountBalance(a.id, booksAsOf)})).filter(x=>Math.abs(x.bal)>0.004);
+  const liabilities = DB.ledgerAccounts.filter(a=>a.nature==="Liability").map(a=>({a, bal:accountBalance(a.id, booksAsOf)})).filter(x=>Math.abs(x.bal)>0.004);
+  const equity = DB.ledgerAccounts.filter(a=>a.nature==="Equity").map(a=>({a, bal:accountBalance(a.id, booksAsOf)})).filter(x=>Math.abs(x.bal)>0.004);
+  const cumulativePnl = pnlForRange("1900-01-01", booksAsOf).netProfit;
+
+  const totalAssets = assets.reduce((s,x)=>s+x.bal,0);
+  const totalLiab = liabilities.reduce((s,x)=>s+x.bal,0);
+  const totalEquity = equity.reduce((s,x)=>s+x.bal,0) + cumulativePnl;
+
+  return `
+  <div class="card">
+    <h2>Balance Sheet</h2>
+    <div class="row"><div class="field" style="max-width:180px;"><label>As of</label><input type="date" id="bs_asof" value="${booksAsOf}"></div>
+      <button class="btn ghost" id="loadBalanceBtn">Apply</button></div>
+    <div class="grid grid-2">
+      <div>
+        <div class="section-title">Liabilities &amp; Equity</div>
+        <div class="tablewrap"><table><tbody>
+          ${liabilities.map(x=>`<tr><td>${x.a.name}</td><td class="num">${fmt(x.bal)}</td></tr>`).join("")}
+          ${equity.map(x=>`<tr><td>${x.a.name}</td><td class="num">${fmt(x.bal)}</td></tr>`).join("")}
+          <tr><td>Profit &amp; Loss A/c (cumulative)</td><td class="num">${fmt(cumulativePnl)}</td></tr>
+          <tr style="font-weight:700;background:var(--total-bg,#eef1f6);"><td>Total</td><td class="num">${fmt(totalLiab+totalEquity)}</td></tr>
+        </tbody></table></div>
+      </div>
+      <div>
+        <div class="section-title">Assets</div>
+        <div class="tablewrap"><table><tbody>
+          ${assets.map(x=>`<tr><td>${x.a.name}</td><td class="num">${fmt(x.bal)}</td></tr>`).join("")}
+          <tr style="font-weight:700;background:var(--total-bg,#eef1f6);"><td>Total</td><td class="num">${fmt(totalAssets)}</td></tr>
+        </tbody></table></div>
+      </div>
+    </div>
+    <p class="helptext" style="margin-top:8px;">${Math.abs(totalAssets-(totalLiab+totalEquity))<0.01 ? '<span class="pill ok">Balanced</span>' : '<span class="pill warn">Not Balanced</span>'}</p>
   </div>`;
 }
 
@@ -956,8 +1455,8 @@ function renderPayslip(){
   return selectorHtml + `<div class="card">${payslipHtml}</div>`;
 }
 
-// ============================= ACCOUNTING =============================
-function computePnL(month, year){
+// ============================= ACCOUNTING (legacy simple tab) =============================
+function computePnLLegacy(month, year){
   const revenue = DB.invoices.filter(i=>{
     const d = new Date(i.date+"T00:00:00"); return d.getMonth()+1===month && d.getFullYear()===year;
   }).reduce((a,i)=>a+i.amount,0);
@@ -975,7 +1474,7 @@ let acctPeriod = null;
 function renderAccounting(){
   const now = new Date();
   if(!acctPeriod) acctPeriod = {month: now.getMonth()+1, year: now.getFullYear()};
-  const pnl = computePnL(acctPeriod.month, acctPeriod.year);
+  const pnl = computePnLLegacy(acctPeriod.month, acctPeriod.year);
 
   const invRows = DB.invoices.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(i=>`
     <tr data-id="${i.id}">
@@ -1171,19 +1670,11 @@ async function punchAction(kind){
     const { data, error } = await sb.functions.invoke("punch-attendance", { body: { kind } });
     if(error){
       console.error("Punch failed:", error);
-      let detail = error.message;
-      if(error.context && typeof error.context.json === "function"){
-        try{
-          const body = await error.context.json();
-          if(body && body.error) detail = body.error;
-          if(body && body.detectedIp) detail += " (detected IP: " + body.detectedIp + ")";
-        }catch(_){ /* response wasn't JSON */ }
-      }
-      toast("Could not punch " + kind + ": " + detail, true);
+      toast("Could not punch " + kind + ": " + error.message + " — make sure the punch-attendance Edge Function is deployed.", true);
       return;
     }
     if(data && data.error){
-      toast(data.error + (data.detectedIp ? " (detected IP: " + data.detectedIp + ")" : ""), true);
+      toast(data.error, true);
       return;
     }
     toast(kind==="in" ? "Punched in." : "Punched out.");
@@ -1950,6 +2441,140 @@ function attachHandlers(){
     });
   }
 
+  if(activeTab==="Books"){
+    document.querySelectorAll(".booksNavBtn").forEach(b=>b.onclick=()=>{ booksView = b.dataset.view; renderAll(); });
+
+    if(booksView==="accounts"){
+      document.getElementById("addAccBtn").onclick = async ()=>{
+        const name = val("acc_name").trim();
+        if(!name){ toast("Enter an account name.", true); return; }
+        const [nature, accGroup] = val("acc_group").split("|");
+        const isPartyType = val("acc_isparty");
+        const id = newId("ACC");
+        const row = { id, name, acc_group: accGroup, nature, is_party: !!isPartyType,
+          party_type: isPartyType || null, opening_balance: parseFloat(val("acc_opening"))||0,
+          opening_balance_type: "Dr", is_system: false };
+        const { error } = await sb.from("ledger_accounts").insert(row);
+        if(error){ toast("Could not add account: " + error.message, true); return; }
+        DB.ledgerAccounts.push({id, name, accGroup, nature, isParty:!!isPartyType, partyType:isPartyType||null,
+          openingBalance:row.opening_balance, openingBalanceType:"Dr", isSystem:false});
+        toast("Account added.");
+        renderAll();
+      };
+      document.querySelectorAll(".delAccBtn").forEach(b=>b.onclick=async (e)=>{
+        const id = e.target.closest("tr").dataset.id;
+        if(DB.voucherLines.some(l=>l.accountId===id)){ toast("Can't delete — this account has transactions. Delete those vouchers first.", true); return; }
+        if(!confirm("Delete this account?")) return;
+        const { error } = await sb.from("ledger_accounts").delete().eq("id", id);
+        if(error){ toast("Could not delete: " + error.message, true); return; }
+        DB.ledgerAccounts = DB.ledgerAccounts.filter(a=>a.id!==id);
+        toast("Account deleted.");
+        renderAll();
+      });
+    }
+
+    if(booksView==="vouchers"){
+      document.querySelectorAll(".voucherTypeBtn").forEach(b=>b.onclick=()=>{ voucherType = b.dataset.type; renderAll(); });
+      document.getElementById("loadDayBookBtn").onclick = ()=>{
+        booksDayRange = {from: val("db_from"), to: val("db_to")}; renderAll();
+      };
+      document.querySelectorAll(".delVoucherBtn").forEach(b=>b.onclick=async (e)=>{
+        const id = e.target.closest("tr").dataset.id;
+        if(!confirm("Delete this voucher? This cannot be undone.")) return;
+        await deleteVoucher(id);
+        renderAll();
+      });
+
+      if(voucherType==="Journal"){
+        document.getElementById("jrAddRowBtn").onclick = ()=>{ journalRows.push({account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0}); renderAll(); };
+        document.querySelectorAll(".jrRemoveBtn").forEach(b=>b.onclick=()=>{
+          journalRows.splice(parseInt(b.dataset.i), 1);
+          if(journalRows.length<2) journalRows.push({account:"", debit:0, credit:0});
+          renderAll();
+        });
+        document.querySelectorAll(".jrAccount").forEach(sel=>sel.onchange=()=>{ journalRows[parseInt(sel.dataset.i)].account = sel.value; });
+        document.querySelectorAll(".jrDebit").forEach(inp=>inp.oninput=()=>{ journalRows[parseInt(inp.dataset.i)].debit = parseFloat(inp.value)||0; });
+        document.querySelectorAll(".jrCredit").forEach(inp=>inp.oninput=()=>{ journalRows[parseInt(inp.dataset.i)].credit = parseFloat(inp.value)||0; });
+      }
+
+      const saveBtn = document.getElementById("saveVoucherBtn");
+      if(saveBtn) saveBtn.onclick = async ()=>{
+        const kind = saveBtn.dataset.kind;
+        const date = val("v_date");
+        const narration = val("v_narration");
+        let voucher, lines;
+
+        if(kind==="Sales" || kind==="Purchase"){
+          const partyId = val("v_party");
+          const acctId = val("v_account");
+          const amount = parseFloat(val("v_amount"))||0;
+          const gstPct = parseFloat(val("v_gst"))||0;
+          if(!partyId || amount<=0){ toast("Choose a party and enter a positive amount.", true); return; }
+          const gstAmt = amount * gstPct/100;
+          voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date, partyId, narration};
+          if(kind==="Sales"){
+            lines = [
+              {accountId:partyId, debit:amount+gstAmt, credit:0},
+              {accountId:acctId, debit:0, credit:amount},
+            ];
+            if(gstAmt>0) lines.push({accountId:SYS_ACCOUNTS.gstPayable, debit:0, credit:gstAmt});
+          } else {
+            lines = [
+              {accountId:acctId, debit:amount, credit:0},
+              {accountId:partyId, debit:0, credit:amount+gstAmt},
+            ];
+            if(gstAmt>0) lines.push({accountId:SYS_ACCOUNTS.gstInput, debit:gstAmt, credit:0});
+          }
+        } else if(kind==="Payment" || kind==="Receipt"){
+          const cashBankId = val("v_cashbank");
+          const target = val("v_target");
+          const amount = parseFloat(val("v_amount"))||0;
+          if(!target || amount<=0){ toast("Choose who to pay/receive from and enter a positive amount.", true); return; }
+          const [targetKind, targetId] = target.split(":");
+          voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date,
+            partyId: targetKind==="party" ? targetId : null, narration};
+          if(kind==="Payment"){
+            lines = [{accountId:targetId, debit:amount, credit:0}, {accountId:cashBankId, debit:0, credit:amount}];
+          } else {
+            lines = [{accountId:cashBankId, debit:amount, credit:0}, {accountId:targetId, debit:0, credit:amount}];
+          }
+        } else if(kind==="Contra"){
+          const from = val("v_from"), to = val("v_to");
+          const amount = parseFloat(val("v_amount"))||0;
+          if(from===to){ toast("From and To must be different accounts.", true); return; }
+          if(amount<=0){ toast("Enter a positive amount.", true); return; }
+          voucher = {id:newId("VCH"), voucherType:"Contra", voucherNo:nextVoucherNo("Contra"), date, partyId:null, narration};
+          lines = [{accountId:to, debit:amount, credit:0}, {accountId:from, debit:0, credit:amount}];
+        } else if(kind==="Journal"){
+          voucher = {id:newId("VCH"), voucherType:"Journal", voucherNo:nextVoucherNo("Journal"), date, partyId:null, narration};
+          lines = journalRows.filter(r=>r.account && ((r.debit||0)>0 || (r.credit||0)>0))
+            .map(r=>({accountId:r.account, debit:parseFloat(r.debit)||0, credit:parseFloat(r.credit)||0}));
+        }
+
+        const ok = await saveVoucher(voucher, lines);
+        if(ok){
+          toast(kind + " voucher saved.");
+          if(kind==="Journal") journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
+          renderAll();
+        }
+      };
+    }
+
+    if(booksView==="trial"){
+      document.getElementById("loadTrialBtn").onclick = ()=>{ booksAsOf = val("tb_asof"); renderAll(); };
+    }
+    if(booksView==="balance"){
+      document.getElementById("loadBalanceBtn").onclick = ()=>{ booksAsOf = val("bs_asof"); renderAll(); };
+    }
+    if(booksView==="pnl"){
+      document.getElementById("loadPnlBtn").onclick = ()=>{ booksPnlRange = {from:val("pnl_from"), to:val("pnl_to")}; renderAll(); };
+    }
+    if(booksView==="parties"){
+      const sel = document.getElementById("partySelect");
+      if(sel) sel.onchange = ()=>{ booksPartyId = sel.value || null; renderAll(); };
+    }
+  }
+
   if(activeTab==="Attendance"){
     if(currentRole === "Employee"){
       const inBtn = document.getElementById("punchInBtn");
@@ -2119,14 +2744,7 @@ function attachHandlers(){
         });
         if(error){
           console.error("Create user failed:", error);
-          let detail = error.message;
-          if(error.context && typeof error.context.json === "function"){
-            try{
-              const body = await error.context.json();
-              if(body && body.error) detail = body.error;
-            }catch(_){ /* response wasn't JSON */ }
-          }
-          toast("Could not create user: " + detail, true);
+          toast("Could not create user: " + error.message + " — make sure the admin-create-user Edge Function is deployed.", true);
           return;
         }
         if(data && data.error){ toast("Could not create user: " + data.error, true); return; }
@@ -2284,7 +2902,8 @@ async function startApp(){
   document.getElementById("authScreen").style.display = "none";
   document.getElementById("appRoot").style.display = "block";
   await loadDB();
-  if(currentProfile.role === "Admin" || currentProfile.role === "Director"){ await loadTeam(); await loadAllowedIps(); }
+  if(currentProfile.role === "Admin"){ await loadTeam(); await loadAllowedIps(); }
+  if(currentProfile.role !== "Employee"){ await loadAccountingData(); }
   renderAll();
 }
 
