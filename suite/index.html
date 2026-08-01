@@ -238,39 +238,39 @@ const DEFAULT_SETTINGS = {
 };
 
 const SEED_EMPLOYEES = [
-  {id:"E001",name:"Shivraj",doj:"2026-06-22",status:"Active",basic:7500,hra:3000,other:4500},
-  {id:"E002",name:"Viswajeet",doj:"2026-06-22",status:"Active",basic:7500,hra:3000,other:4500},
-  {id:"E003",name:"Parshuram",doj:"2026-06-23",status:"Active",basic:5000,hra:2000,other:3000},
-  {id:"E004",name:"Payal",doj:"2026-06-26",status:"Active",basic:6000,hra:2400,other:3600},
-  {id:"E005",name:"Vijaykumar",doj:"2026-06-26",status:"Active",basic:7500,hra:3000,other:4500},
-  {id:"E006",name:"Sachin",doj:"2026-06-26",status:"Active",basic:7500,hra:3000,other:4500},
-  {id:"E007",name:"Neha",doj:"2026-06-26",status:"Active",basic:6000,hra:2400,other:3600},
-  {id:"E008",name:"Sakshi",doj:"2026-06-26",status:"Active",basic:6000,hra:2400,other:3600},
-  {id:"E009",name:"Pravina",doj:"2026-06-29",status:"Active",basic:6500,hra:2600,other:3900},
-  {id:"E010",name:"Renuka",doj:"2026-06-29",status:"Active",basic:6000,hra:2400,other:3600},
-  {id:"E011",name:"Preetam",doj:"2026-07-07",status:"Active",basic:3000,hra:1200,other:1800}
+  {id:"AZ001",name:"Shivraj",doj:"2026-06-22",status:"Active",basic:7500,hra:3000,other:4500},
+  {id:"AZ002",name:"Viswajeet",doj:"2026-06-22",status:"Active",basic:7500,hra:3000,other:4500},
+  {id:"AZ003",name:"Parshuram",doj:"2026-06-23",status:"Active",basic:5000,hra:2000,other:3000},
+  {id:"AZ004",name:"Payal",doj:"2026-06-26",status:"Active",basic:6000,hra:2400,other:3600},
+  {id:"AZ005",name:"Vijaykumar",doj:"2026-06-26",status:"Active",basic:7500,hra:3000,other:4500},
+  {id:"AZ006",name:"Sachin",doj:"2026-06-26",status:"Active",basic:7500,hra:3000,other:4500},
+  {id:"AZ007",name:"Neha",doj:"2026-06-26",status:"Active",basic:6000,hra:2400,other:3600},
+  {id:"AZ008",name:"Sakshi",doj:"2026-06-26",status:"Active",basic:6000,hra:2400,other:3600},
+  {id:"AZ009",name:"Pravina",doj:"2026-06-29",status:"Active",basic:6500,hra:2600,other:3900},
+  {id:"AZ010",name:"Renuka",doj:"2026-06-29",status:"Active",basic:6000,hra:2400,other:3600},
+  {id:"AZ011",name:"Preetam",doj:"2026-07-07",status:"Active",basic:3000,hra:1200,other:1800}
 ];
 
 const SEED_PAYROLL = [
-  ...["E001","E002","E003","E004","E005","E006","E007","E008","E009","E010"].map(id=>({month:6,year:2026,empId:id,leaves:0,tds:0})),
-  {month:7,year:2026,empId:"E001",leaves:26,tds:0},
-  {month:7,year:2026,empId:"E002",leaves:9,tds:0},
-  {month:7,year:2026,empId:"E003",leaves:15,tds:0},
-  {month:7,year:2026,empId:"E004",leaves:10,tds:0},
-  {month:7,year:2026,empId:"E005",leaves:11,tds:0},
-  {month:7,year:2026,empId:"E006",leaves:9,tds:0},
-  {month:7,year:2026,empId:"E007",leaves:9,tds:0},
-  {month:7,year:2026,empId:"E008",leaves:12,tds:0},
-  {month:7,year:2026,empId:"E009",leaves:10,tds:0},
-  {month:7,year:2026,empId:"E010",leaves:9,tds:0},
-  {month:7,year:2026,empId:"E011",leaves:10,tds:0}
+  ...["AZ001","AZ002","AZ003","AZ004","AZ005","AZ006","AZ007","AZ008","AZ009","AZ010"].map(id=>({month:6,year:2026,empId:id,leaves:0,tds:0})),
+  {month:7,year:2026,empId:"AZ001",leaves:26,tds:0},
+  {month:7,year:2026,empId:"AZ002",leaves:9,tds:0},
+  {month:7,year:2026,empId:"AZ003",leaves:15,tds:0},
+  {month:7,year:2026,empId:"AZ004",leaves:10,tds:0},
+  {month:7,year:2026,empId:"AZ005",leaves:11,tds:0},
+  {month:7,year:2026,empId:"AZ006",leaves:9,tds:0},
+  {month:7,year:2026,empId:"AZ007",leaves:9,tds:0},
+  {month:7,year:2026,empId:"AZ008",leaves:12,tds:0},
+  {month:7,year:2026,empId:"AZ009",leaves:10,tds:0},
+  {month:7,year:2026,empId:"AZ010",leaves:9,tds:0},
+  {month:7,year:2026,empId:"AZ011",leaves:10,tds:0}
 ];
 
 // ============================= TABLE MAPPINGS (JS <-> Postgres) =============================
 const TABLE_CONFIG = {
   employees:    { table:"employees",
-    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other}),
-    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other)}) },
+    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null}),
+    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||''}) },
   payroll:      { table:"payroll",
     toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds}),
     fromRow:r=>({id:r.id,month:r.month,year:r.year,empId:r.emp_id,leaves:Number(r.leaves),tds:Number(r.tds)}) },
@@ -409,6 +409,27 @@ function toast(msg, isErr){
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), isErr ? 9000 : 3200);
+}
+
+// ============================= PAGINATION =============================
+const paginationState = {};
+function paginate(list, key, pageSize=20){
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+  if(!paginationState[key] || paginationState[key] > totalPages) paginationState[key] = 1;
+  if(paginationState[key] < 1) paginationState[key] = 1;
+  const page = paginationState[key];
+  const start = (page-1)*pageSize;
+  return { pageItems: list.slice(start, start+pageSize), page, totalPages, total: list.length };
+}
+function renderPager(key, page, totalPages, total){
+  if(totalPages <= 1) return "";
+  return `
+  <div class="row" data-pager="${key}" style="align-items:center;justify-content:flex-end;gap:8px;margin-top:10px;">
+    <span class="helptext">${total} total</span>
+    <button class="btn ghost sm pagerBtn" data-key="${key}" data-dir="prev" ${page<=1?'disabled':''}>Prev</button>
+    <span class="helptext">Page ${page} of ${totalPages}</span>
+    <button class="btn ghost sm pagerBtn" data-key="${key}" data-dir="next" ${page>=totalPages?'disabled':''}>Next</button>
+  </div>`;
 }
 
 // supabase-js only puts a generic "non-2xx status code" message on `error.message` —
@@ -640,21 +661,35 @@ function renderSettings(){
       Employees enroll their own fingerprint from the Attendance tab — nothing to do here for that part.
     </p>
     <div class="row">
-      <div class="field" style="max-width:200px;"><label>Latitude</label><input id="officeLat" placeholder="e.g. 18.5204" value="${s.officeLat ?? ''}"></div>
-      <div class="field" style="max-width:200px;"><label>Longitude</label><input id="officeLng" placeholder="e.g. 73.8567" value="${s.officeLng ?? ''}"></div>
-      <div class="field" style="max-width:160px;"><label>Radius (meters)</label><input id="officeRadiusM" type="number" placeholder="150" value="${s.officeRadiusM ?? 150}"></div>
+      <div class="field" style="max-width:200px;"><label>Latitude</label><input id="officeLat" placeholder="e.g. 18.5204" value="${s.officeLat==null?'':s.officeLat}"></div>
+      <div class="field" style="max-width:200px;"><label>Longitude</label><input id="officeLng" placeholder="e.g. 73.8567" value="${s.officeLng==null?'':s.officeLng}"></div>
+      <div class="field" style="max-width:160px;"><label>Radius (meters)</label><input id="officeRadiusM" type="number" placeholder="150" value="${s.officeRadiusM==null?150:s.officeRadiusM}"></div>
       <button class="btn ghost" id="useMyLocationBtn">Use My Current Location</button>
     </div>
   </div>`;
 }
 
 // ============================= EMPLOYEES =============================
+function nextEmpId(){
+  const nums = DB.employees.map(e=>{
+    const m = /^AZ(\d+)$/.exec(e.id);
+    return m ? parseInt(m[1],10) : 0;
+  });
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  return "AZ" + String(next).padStart(3,"0");
+}
+
 function renderEmployees(){
-  const rows = DB.employees.map(e=>`
+  const sorted = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id));
+  const { pageItems, page, totalPages, total } = paginate(sorted, "employees", 20);
+  const rows = pageItems.map(e=>`
     <tr data-id="${e.id}">
       <td>${e.id}</td>
       <td>${e.name}</td>
       <td>${e.doj}</td>
+      <td>${e.dob||'—'}</td>
+      <td>${e.email||'—'}</td>
+      <td>${e.resignDate||'—'}</td>
       <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span></td>
       <td class="num">${fmt0(e.basic)}</td>
       <td class="num">${fmt0(e.hra)}</td>
@@ -671,18 +706,22 @@ function renderEmployees(){
     <div class="sub">Add, edit or remove employees. Emp ID must be unique.</div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Emp ID</th><th>Name</th><th>DOJ</th><th>Status</th><th>Basic</th><th>HRA</th><th>Other</th><th>Gross</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="9" class="empty">No employees yet — add one below.</td></tr>`}</tbody>
+        <thead><tr><th>Emp ID</th><th>Name</th><th>DOJ</th><th>DOB</th><th>Email</th><th>Resigned</th><th>Status</th><th>Basic</th><th>HRA</th><th>Other</th><th>Gross</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="12" class="empty">No employees yet — add one below.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("employees", page, totalPages, total)}
   </div>
   <div class="card">
     <h2 id="empFormTitle">Add Employee</h2>
     <input type="hidden" id="empEditingId" value="">
     <div class="grid grid-4">
-      <div class="field"><label>Emp ID</label><input id="f_id" placeholder="E012"></div>
+      <div class="field"><label>Emp ID</label><input id="f_id" placeholder="${nextEmpId()}" value="${nextEmpId()}"></div>
       <div class="field"><label>Name</label><input id="f_name" placeholder="Full name"></div>
       <div class="field"><label>Date of Joining</label><input type="date" id="f_doj"></div>
+      <div class="field"><label>Date of Birth</label><input type="date" id="f_dob"></div>
+      <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
+      <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
       <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
       <div class="field"><label>Basic (₹)</label><input type="number" id="f_basic" value="0"></div>
       <div class="field"><label>HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
@@ -1408,6 +1447,7 @@ function renderPayslip(){
       <div class="field" style="max-width:120px;"><label>Year</label><input type="number" id="ps_year" value="${payslipState.year}"></div>
       <button class="btn ghost" id="loadPayslipBtn">Load</button>
       <button class="btn gold" id="downloadPdfBtn">Download PDF</button>
+      <button class="btn gold" id="emailPayslipBtn">Email Payslip</button>
     </div>
   </div>`;
 
@@ -1887,7 +1927,8 @@ function renderLeaves(){
   const list = (scoped ? DB.leaves.filter(l=>l.empId===empId) : DB.leaves.slice())
     .sort((a,b)=>b.fromDate.localeCompare(a.fromDate));
 
-  const rows = list.map(l=>{
+  const { pageItems: leavePage, page: lvPage, totalPages: lvTotalPages, total: lvTotal } = paginate(list, "leaves", 20);
+  const rows = leavePage.map(l=>{
     const emp = DB.employees.find(e=>e.id===l.empId);
     return `<tr data-id="${l.id}">
       <td>${l.empId}</td><td>${emp?emp.name:''}</td><td>${l.type}</td>
@@ -1929,6 +1970,7 @@ function renderLeaves(){
         <tbody>${rows || `<tr><td colspan="9" class="empty">No leave requests yet.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("leaves", lvPage, lvTotalPages, lvTotal)}
     <div class="section-title" id="lvFormTitle">New Leave Request</div>
     <input type="hidden" id="lv_editing_id" value="">
     <div class="grid grid-4">
@@ -1956,7 +1998,9 @@ function renderCRM(){
   const followUps = DB.leads.filter(l=>l.nextFollowUp && new Date(l.nextFollowUp)<=soon && !["Won","Lost"].includes(l.stage))
     .sort((a,b)=>a.nextFollowUp.localeCompare(b.nextFollowUp));
 
-  const rows = DB.leads.slice().sort((a,b)=>(b.nextFollowUp||'').localeCompare(a.nextFollowUp||'')).map(l=>`
+  const sortedLeads = DB.leads.slice().sort((a,b)=>(b.nextFollowUp||'').localeCompare(a.nextFollowUp||''));
+  const { pageItems: leadsPage, page: ldPage, totalPages: ldTotalPages, total: ldTotal } = paginate(sortedLeads, "leads", 20);
+  const rows = leadsPage.map(l=>`
     <tr data-id="${l.id}">
       <td>${l.name}</td><td>${l.company||''}</td><td>${l.contact||''}</td>
       <td class="num">${fmt0(l.value||0)}</td>
@@ -1989,6 +2033,7 @@ function renderCRM(){
         <tbody>${rows || `<tr><td colspan="8" class="empty">No leads yet — add one below.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("leads", ldPage, ldTotalPages, ldTotal)}
     <div class="section-title" id="ldFormTitle">Add Lead</div>
     <input type="hidden" id="ld_editing_id" value="">
     <div class="grid grid-4">
@@ -2081,11 +2126,11 @@ function dateInRange(dateStr, from, to){
 
 const REPORT_DEFS = {
   employees: {
-    label: "Employees", headers: ["Emp ID","Name","DOJ","Status","Basic","HRA","Other Allowance","Gross"],
+    label: "Employees", headers: ["Emp ID","Name","DOJ","DOB","Email","Resigned","Status","Basic","HRA","Other Allowance","Gross"],
     dateNote: "Filtered by Date of Joining.",
     rows(from,to){
       return DB.employees.filter(e=>dateInRange(e.doj, from, to))
-        .map(e=>[e.id,e.name,e.doj,e.status,e.basic,e.hra,e.other,e.basic+e.hra+e.other]);
+        .map(e=>[e.id,e.name,e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,e.basic,e.hra,e.other,e.basic+e.hra+e.other]);
     }
   },
   payroll: {
@@ -2268,7 +2313,8 @@ function renderTeam(){
       </td>
     </tr>`).join("");
 
-  const rows = others.map(p=>`
+  const { pageItems: othersPage, page: teamPage, totalPages: teamTotalPages, total: teamTotal } = paginate(others, "team", 20);
+  const rows = othersPage.map(p=>`
     <tr data-id="${p.id}">
       <td>${p.name}${p.id === currentUser.id ? " (you)" : ""}</td>
       <td>
@@ -2352,11 +2398,19 @@ function renderTeam(){
         <tbody>${rows || `<tr><td colspan="5" class="empty">No approved team members yet.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("team", teamPage, teamTotalPages, teamTotal)}
   </div>`;
 }
 
 // ============================= EVENT HANDLERS =============================
 function attachHandlers(){
+  document.querySelectorAll(".pagerBtn").forEach(b=>b.onclick=()=>{
+    const key = b.dataset.key;
+    const cur = paginationState[key] || 1;
+    paginationState[key] = b.dataset.dir === "prev" ? Math.max(1, cur-1) : cur+1;
+    renderAll();
+  });
+
   if(activeTab==="Settings"){
     document.getElementById("saveSettingsBtn").onclick = async ()=>{
       DB.settings = {
@@ -2401,6 +2455,9 @@ function attachHandlers(){
       document.getElementById("f_id").value = emp.id; document.getElementById("f_id").disabled = true;
       document.getElementById("f_name").value = emp.name;
       document.getElementById("f_doj").value = emp.doj;
+      document.getElementById("f_dob").value = emp.dob||"";
+      document.getElementById("f_email").value = emp.email||"";
+      document.getElementById("f_resign").value = emp.resignDate||"";
       document.getElementById("f_status").value = emp.status;
       document.getElementById("f_basic").value = emp.basic;
       document.getElementById("f_hra").value = emp.hra;
@@ -2425,6 +2482,7 @@ function attachHandlers(){
       if(!editingId && DB.employees.some(x=>x.id===id)){ toast("Emp ID already exists.", true); return; }
       const record = {
         id, name, doj: val("f_doj") || "2026-01-01", status: val("f_status"),
+        dob: val("f_dob") || "", email: val("f_email").trim() || "", resignDate: val("f_resign") || "",
         basic: parseFloat(val("f_basic"))||0, hra: parseFloat(val("f_hra"))||0, other: parseFloat(val("f_other"))||0
       };
       if(editingId){
@@ -2525,6 +2583,8 @@ function attachHandlers(){
     };
     const dlBtn = document.getElementById("downloadPdfBtn");
     if(dlBtn) dlBtn.onclick = downloadPayslipPdf;
+    const emailBtn = document.getElementById("emailPayslipBtn");
+    if(emailBtn) emailBtn.onclick = emailPayslip;
   }
 
   if(activeTab==="Accounting"){
@@ -3021,28 +3081,58 @@ function upsertPayment(month,year,empId,patch){
 }
 
 // ============================= PDF EXPORT =============================
-async function downloadPayslipPdf(){
+async function buildPayslipPdf(){
   const area = document.getElementById("payslipPrintArea");
-  if(!area){ toast("Nothing to export.", true); return; }
+  if(!area) throw new Error("Nothing to export.");
+  const canvas = await html2canvas(area, {scale:2, backgroundColor:"#ffffff"});
+  const imgData = canvas.toDataURL("image/png");
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({unit:"pt", format:"a4"});
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const imgWidth = pageWidth - 60;
+  const imgHeight = canvas.height * (imgWidth/canvas.width);
+  pdf.addImage(imgData, "PNG", 30, 30, imgWidth, imgHeight);
+  const emp = DB.employees.find(e=>e.id===payslipState.empId);
+  const filename = `Payslip_${emp?emp.name:payslipState.empId}_${monthName(payslipState.month)}_${payslipState.year}.pdf`;
+  return { pdf, filename, emp };
+}
+
+async function downloadPayslipPdf(){
   const btn = document.getElementById("downloadPdfBtn");
   btn.textContent = "Generating…"; btn.disabled = true;
   try{
-    const canvas = await html2canvas(area, {scale:2, backgroundColor:"#ffffff"});
-    const imgData = canvas.toDataURL("image/png");
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({unit:"pt", format:"a4"});
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const imgWidth = pageWidth - 60;
-    const imgHeight = canvas.height * (imgWidth/canvas.width);
-    pdf.addImage(imgData, "PNG", 30, 30, imgWidth, imgHeight);
-    const emp = DB.employees.find(e=>e.id===payslipState.empId);
-    pdf.save(`Payslip_${emp?emp.name:payslipState.empId}_${monthName(payslipState.month)}_${payslipState.year}.pdf`);
+    const { pdf, filename } = await buildPayslipPdf();
+    pdf.save(filename);
     toast("Payslip PDF downloaded.");
   }catch(err){
     console.error(err);
     toast("Could not generate PDF: "+err.message, true);
   }finally{
     btn.textContent = "Download PDF"; btn.disabled = false;
+  }
+}
+
+async function emailPayslip(){
+  const btn = document.getElementById("emailPayslipBtn");
+  btn.textContent = "Sending…"; btn.disabled = true;
+  try{
+    const { pdf, filename, emp } = await buildPayslipPdf();
+    if(!emp || !emp.email){
+      toast("This employee has no email address on file. Add one in the Employees tab.", true);
+      return;
+    }
+    const base64 = pdf.output("datauristring").split(",")[1];
+    const { data, error } = await sb.functions.invoke("send-payslip-email", {
+      body: { emp_id: payslipState.empId, month: payslipState.month, year: payslipState.year, filename, pdf_base64: base64 }
+    });
+    if(error){ toast("Could not email payslip: " + (await extractFnError(error)), true); return; }
+    if(data && data.error){ toast(data.error, true); return; }
+    toast("Payslip emailed to " + emp.email + ".");
+  }catch(err){
+    console.error(err);
+    toast("Could not email payslip: "+err.message, true);
+  }finally{
+    btn.textContent = "Email Payslip"; btn.disabled = false;
   }
 }
 
