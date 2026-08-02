@@ -127,11 +127,14 @@
     <h2 id="authTitle" style="text-align:center;">Sign In</h2>
     <div id="authError" style="display:none;background:#FCEFE0;color:var(--warn);padding:8px 10px;border-radius:6px;font-size:12.5px;margin-bottom:10px;"></div>
     <div id="authNameField" class="field" style="display:none;"><label>Your Name</label><input id="auth_name" placeholder="Full name"></div>
-    <div class="field"><label>Email</label><input id="auth_email" type="email" placeholder="you@auzentis.com"></div>
+    <div id="authEmailField" class="field"><label>Email</label><input id="auth_email" type="email" placeholder="you@auzentis.com"></div>
     <div class="field"><label>Password</label><input id="auth_password" type="password" placeholder="At least 6 characters"></div>
     <button class="btn gold" id="authSubmitBtn" style="width:100%;">Sign In</button>
     <p class="helptext" style="text-align:center;margin-top:12px;">
       <a href="#" id="authToggleLink" style="color:var(--navy);">Need an account? Sign up</a>
+    </p>
+    <p class="helptext" style="text-align:center;">
+      <a href="#" id="authForgotLink" style="color:var(--navy);">Forgot password?</a>
     </p>
     <p class="helptext" style="text-align:center;">New accounts require Admin approval before you can sign in.</p>
   </div>
@@ -432,6 +435,28 @@ function renderPager(key, page, totalPages, total){
   </div>`;
 }
 
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ============================= AUDIT LOG =============================
+async function logAudit(action, tableName, recordId, detail){
+  try{
+    await sb.from("audit_log").insert({
+      actor_id: currentUser.id,
+      actor_name: currentProfile ? currentProfile.name : (currentUser ? currentUser.email : null),
+      action, table_name: tableName, record_id: recordId==null ? null : String(recordId), detail: detail || null
+    });
+  }catch(e){ console.error("Audit log failed:", e); }
+}
+
+let auditLog = [];
+async function loadAuditLog(){
+  const { data, error } = await sb.from("audit_log").select("*").order("created_at",{ascending:false}).limit(200);
+  if(error){ console.error("Could not load audit log:", error); auditLog = []; return; }
+  auditLog = data || [];
+}
+
 // supabase-js only puts a generic "non-2xx status code" message on `error.message` —
 // the Edge Function's actual JSON error body is on `error.context` (a raw Response).
 async function extractFnError(error){
@@ -679,6 +704,70 @@ function nextEmpId(){
   return "AZ" + String(next).padStart(3,"0");
 }
 
+// Minimal CSV parser: handles quoted fields, embedded commas, and "" escaped quotes.
+function parseCsv(text){
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; }
+      } else field += c;
+    } else if(c === '"'){
+      inQuotes = true;
+    } else if(c === ','){
+      row.push(field); field = "";
+    } else if(c === '\n' || c === '\r'){
+      if(c === '\r' && text[i+1] === '\n') i++;
+      row.push(field); field = "";
+      if(row.some(v=>v.trim()!=="")) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if(field !== "" || row.length){ row.push(field); if(row.some(v=>v.trim()!=="")) rows.push(row); }
+  return rows;
+}
+
+async function importEmployeesCsv(text){
+  const rows = parseCsv(text);
+  if(rows.length < 2){ toast("CSV has no data rows.", true); return; }
+  const header = rows[0].map(h=>h.trim().toLowerCase());
+  const col = (name)=>header.indexOf(name);
+  const idxName = col("name");
+  if(idxName === -1){ toast("CSV must have a \"Name\" column.", true); return; }
+  const idxId = col("emp id"), idxDoj = col("doj"), idxDob = col("dob"), idxEmail = col("email"),
+        idxResign = col("resigning date"), idxStatus = col("status"),
+        idxBasic = col("basic"), idxHra = col("hra"), idxOther = col("other");
+
+  let imported = 0, skipped = 0;
+  for(const r of rows.slice(1)){
+    const name = (r[idxName]||"").trim();
+    if(!name){ skipped++; continue; }
+    let id = idxId>=0 ? (r[idxId]||"").trim() : "";
+    if(!id) id = nextEmpId();
+    if(DB.employees.some(e=>e.id===id)){ skipped++; continue; }
+    DB.employees.push({
+      id, name,
+      doj: (idxDoj>=0 && r[idxDoj]) ? r[idxDoj].trim() : "2026-01-01",
+      dob: idxDob>=0 ? (r[idxDob]||"").trim() : "",
+      email: idxEmail>=0 ? (r[idxEmail]||"").trim() : "",
+      resignDate: idxResign>=0 ? (r[idxResign]||"").trim() : "",
+      status: (idxStatus>=0 && r[idxStatus]) ? r[idxStatus].trim() : "Active",
+      basic: idxBasic>=0 ? (parseFloat(r[idxBasic])||0) : 0,
+      hra: idxHra>=0 ? (parseFloat(r[idxHra])||0) : 0,
+      other: idxOther>=0 ? (parseFloat(r[idxOther])||0) : 0,
+    });
+    imported++;
+  }
+  if(imported){
+    await save("employees");
+    await logAudit("bulk_import", "employees", null, {imported, skipped});
+  }
+  toast(`Imported ${imported} employee(s)${skipped?`, skipped ${skipped} (missing name or duplicate ID)`:''}.`);
+  renderAll();
+}
+
 function renderEmployees(){
   const sorted = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id));
   const { pageItems, page, totalPages, total } = paginate(sorted, "employees", 20);
@@ -704,6 +793,10 @@ function renderEmployees(){
   <div class="card">
     <h2>Employee Master</h2>
     <div class="sub">Add, edit or remove employees. Emp ID must be unique.</div>
+    <div class="row">
+      <button class="btn ghost" id="downloadCsvTemplateBtn">Download CSV Template</button>
+      <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importCsvInput" accept=".csv" style="display:none;"></label>
+    </div>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Emp ID</th><th>Name</th><th>DOJ</th><th>DOB</th><th>Email</th><th>Resigned</th><th>Status</th><th>Basic</th><th>HRA</th><th>Other</th><th>Gross</th><th></th></tr></thead>
@@ -2399,6 +2492,31 @@ function renderTeam(){
       </table>
     </div>
     ${renderPager("team", teamPage, teamTotalPages, teamTotal)}
+  </div>
+  ${renderAuditLogCard()}`;
+}
+
+function renderAuditLogCard(){
+  const { pageItems: logPage, page: alPage, totalPages: alTotalPages, total: alTotal } = paginate(auditLog, "auditLog", 25);
+  const rows = logPage.map(a=>`
+    <tr>
+      <td>${new Date(a.created_at).toLocaleString()}</td>
+      <td>${a.actor_name||'—'}</td>
+      <td>${a.action}</td>
+      <td>${a.table_name||''} ${a.record_id?('#'+a.record_id):''}</td>
+      <td>${a.detail ? `<span class="helptext">${escapeHtml(JSON.stringify(a.detail))}</span>` : ''}</td>
+    </tr>`).join("");
+  return `
+  <div class="card">
+    <h2>Activity Log</h2>
+    <div class="sub">Who changed what, most recent first. Read-only, kept for accountability.</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Record</th><th>Detail</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">No activity recorded yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+    ${renderPager("auditLog", alPage, alTotalPages, alTotal)}
   </div>`;
 }
 
@@ -2423,6 +2541,7 @@ function attachHandlers(){
         officeRadiusM: val("officeRadiusM").trim() ? parseFloat(val("officeRadiusM")) : 150
       };
       await save("settings");
+      await logAudit("update", "settings", null, null);
       toast("Settings saved.");
     };
 
@@ -2468,8 +2587,10 @@ function attachHandlers(){
     document.querySelectorAll(".delEmpBtn").forEach(b=>b.onclick=async (e)=>{
       const id = e.target.closest("tr").dataset.id;
       if(!confirm("Delete employee "+id+"? This cannot be undone.")) return;
+      const emp = DB.employees.find(x=>x.id===id);
       DB.employees = DB.employees.filter(x=>x.id!==id);
       await save("employees");
+      await logAudit("delete", "employees", id, {name: emp?emp.name:null});
       toast("Employee deleted.");
       renderAll();
     });
@@ -2492,8 +2613,25 @@ function attachHandlers(){
         DB.employees.push(record);
       }
       await save("employees");
+      await logAudit(editingId ? "update" : "create", "employees", id, {name});
       toast("Employee saved.");
       renderAll();
+    };
+
+    document.getElementById("importCsvInput").onchange = (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = async ()=>{
+        await importEmployeesCsv(String(reader.result));
+        e.target.value = "";
+      };
+      reader.readAsText(file);
+    };
+    document.getElementById("downloadCsvTemplateBtn").onclick = ()=>{
+      downloadBlob("Employee_Import_Template.csv",
+        "Emp ID,Name,DOJ,DOB,Email,Resigning Date,Status,Basic,HRA,Other\n,Jane Doe,2026-01-15,1995-04-20,jane@auzentis.com,,Active,7500,3000,4500\n",
+        "text/csv;charset=utf-8;");
     };
   }
 
@@ -2510,6 +2648,7 @@ function attachHandlers(){
         upsertPayroll(payrollPeriod.month, payrollPeriod.year, inp.dataset.emp, {tds: parseFloat(inp.value)||0});
       });
       await save("payroll");
+      await logAudit("update", "payroll", `${payrollPeriod.month}/${payrollPeriod.year}`, null);
       toast("Payroll saved for "+monthName(payrollPeriod.month)+" "+payrollPeriod.year+".");
       renderAll();
     };
@@ -2532,6 +2671,7 @@ function attachHandlers(){
         upsertPayment(paymentsPeriod.month, paymentsPeriod.year, id, {amountPaid:paid, paymentDate:date, mode, advanceGiven:advGiven, advanceRecovered:advRec});
       });
       await save("payments");
+      await logAudit("update", "payments", `${paymentsPeriod.month}/${paymentsPeriod.year}`, null);
       toast("Payments saved for "+monthName(paymentsPeriod.month)+" "+paymentsPeriod.year+".");
       renderAll();
     };
@@ -2843,6 +2983,11 @@ function attachHandlers(){
         DB.leaves.push({id:newId("LV"), ...record, status:"Pending"});
       }
       await save("leaves");
+      if(!editingId){
+        sb.functions.invoke("send-leave-notification", {
+          body: {type:"new_request", emp_id:empId, leave_type:record.type, from_date:record.fromDate, to_date:record.toDate, reason:record.reason}
+        }).catch(e=>console.error("Leave notification failed:", e));
+      }
       toast(editingId ? "Leave request updated." : "Leave request submitted.");
       renderAll();
     };
@@ -2870,12 +3015,26 @@ function attachHandlers(){
     document.querySelectorAll(".approveLeaveBtn").forEach(b=>b.onclick=async (e)=>{
       const id = e.target.closest("tr").dataset.id;
       const lv = DB.leaves.find(l=>l.id===id); if(lv) lv.status="Approved";
-      await save("leaves"); toast("Leave approved."); renderAll();
+      await save("leaves");
+      await logAudit("approve", "leaves", id, {empId: lv?lv.empId:null});
+      if(lv){
+        sb.functions.invoke("send-leave-notification", {
+          body: {type:"approved", emp_id:lv.empId, leave_type:lv.type, from_date:lv.fromDate, to_date:lv.toDate}
+        }).catch(e=>console.error("Leave notification failed:", e));
+      }
+      toast("Leave approved."); renderAll();
     });
     document.querySelectorAll(".rejectLeaveBtn").forEach(b=>b.onclick=async (e)=>{
       const id = e.target.closest("tr").dataset.id;
       const lv = DB.leaves.find(l=>l.id===id); if(lv) lv.status="Rejected";
-      await save("leaves"); toast("Leave rejected."); renderAll();
+      await save("leaves");
+      await logAudit("reject", "leaves", id, {empId: lv?lv.empId:null});
+      if(lv){
+        sb.functions.invoke("send-leave-notification", {
+          body: {type:"rejected", emp_id:lv.empId, leave_type:lv.type, from_date:lv.fromDate, to_date:lv.toDate}
+        }).catch(e=>console.error("Leave notification failed:", e));
+      }
+      toast("Leave rejected."); renderAll();
     });
   }
 
@@ -2980,6 +3139,7 @@ function attachHandlers(){
         }
         if(data && data.error){ toast("Could not create user: " + data.error, true); return; }
         await loadTeam();
+        await logAudit("create", "profiles", data.user_id||null, {name, email, role: val("cu_role")});
         toast(name + " can now log in with the password you set.");
         renderAll();
       }catch(e){
@@ -3020,9 +3180,12 @@ function attachHandlers(){
     });
     document.querySelectorAll(".teamRoleSelect").forEach(sel=>sel.onchange=async ()=>{
       const id = sel.dataset.id;
+      const p = teamMembers.find(x=>x.id===id);
+      const oldRole = p ? p.role : null;
       const { error } = await sb.from("profiles").update({ role: sel.value }).eq("id", id);
       if(error){ toast("Could not update role: " + error.message, true); return; }
-      const p = teamMembers.find(x=>x.id===id); if(p) p.role = sel.value;
+      if(p) p.role = sel.value;
+      await logAudit("change_role", "profiles", id, {name: p?p.name:null, from: oldRole, to: sel.value});
       toast("Role updated.");
     });
     document.querySelectorAll(".teamEmpSelect").forEach(sel=>sel.onchange=async ()=>{
@@ -3056,6 +3219,7 @@ function attachHandlers(){
       if(!confirm(`Delete ${p?p.name:"this user"}? This revokes their access to the app immediately. Their login account itself must be removed separately in Supabase → Authentication → Users if you want it fully gone.`)) return;
       const { error } = await sb.from("profiles").delete().eq("id", id);
       if(error){ toast("Could not delete: " + error.message, true); return; }
+      await logAudit("delete", "profiles", id, {name: p?p.name:null});
       await loadTeam();
       toast("User removed.");
       renderAll();
@@ -3139,10 +3303,15 @@ async function emailPayslip(){
 // ============================= INIT =============================
 function setAuthMode(mode){
   const isSignup = mode === "signup";
-  document.getElementById("authTitle").textContent = isSignup ? "Create Account" : "Sign In";
+  const isReset = mode === "reset";
+  document.getElementById("authTitle").textContent = isReset ? "Set New Password" : (isSignup ? "Create Account" : "Sign In");
   document.getElementById("authNameField").style.display = isSignup ? "block" : "none";
-  document.getElementById("authSubmitBtn").textContent = isSignup ? "Sign Up" : "Sign In";
+  document.getElementById("authEmailField").style.display = isReset ? "none" : "block";
+  document.getElementById("auth_password").placeholder = isReset ? "New password (at least 6 characters)" : "At least 6 characters";
+  document.getElementById("authSubmitBtn").textContent = isReset ? "Set New Password" : (isSignup ? "Sign Up" : "Sign In");
+  document.getElementById("authToggleLink").style.display = isReset ? "none" : "inline";
   document.getElementById("authToggleLink").textContent = isSignup ? "Already have an account? Sign in" : "Need an account? Sign up";
+  document.getElementById("authForgotLink").parentElement.style.display = (isReset || isSignup) ? "none" : "block";
   document.getElementById("authSubmitBtn").dataset.mode = mode;
   document.getElementById("authError").style.display = "none";
 }
@@ -3163,7 +3332,7 @@ async function startApp(){
   document.getElementById("authScreen").style.display = "none";
   document.getElementById("appRoot").style.display = "block";
   await loadDB();
-  if(currentProfile.role === "Admin" || currentProfile.role === "Director"){ await loadTeam(); }
+  if(currentProfile.role === "Admin" || currentProfile.role === "Director"){ await loadTeam(); await loadAuditLog(); }
   if(currentProfile.role !== "Employee"){ await loadAccountingData(); }
   if(currentProfile.role === "Employee"){ await loadMyDevices(); }
   renderAll();
@@ -3176,16 +3345,73 @@ async function startApp(){
   document.getElementById("authWordmark").src = LOGO_WORDMARK;
   setAuthMode("login");
 
+  sb.auth.onAuthStateChange((event)=>{
+    if(event === "PASSWORD_RECOVERY"){
+      const overlay = document.getElementById("loadingOverlay");
+      if(overlay) overlay.remove();
+      document.getElementById("appRoot").style.display = "none";
+      document.getElementById("authScreen").style.display = "block";
+      setAuthMode("reset");
+    }
+  });
+
   document.getElementById("authToggleLink").onclick = (e) => {
     e.preventDefault();
     const current = document.getElementById("authSubmitBtn").dataset.mode;
     setAuthMode(current === "signup" ? "login" : "signup");
   };
 
+  document.getElementById("authForgotLink").onclick = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("auth_email").value.trim();
+    if(!email){ showAuthError("Enter your email above first, then click \"Forgot password?\" again."); return; }
+    const link = document.getElementById("authForgotLink");
+    link.textContent = "Sending…";
+    try{
+      const redirectTo = window.location.origin + window.location.pathname;
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+      if(error){ showAuthError(error.message); return; }
+      document.getElementById("authError").style.display = "none";
+      toast("If an account exists for " + email + ", a reset link has been sent.");
+    }catch(err){
+      showAuthError(err.message || "Could not send reset email.");
+    }finally{
+      link.textContent = "Forgot password?";
+    }
+  };
+
   document.getElementById("authSubmitBtn").onclick = async () => {
     const mode = document.getElementById("authSubmitBtn").dataset.mode;
-    const email = document.getElementById("auth_email").value.trim();
     const password = document.getElementById("auth_password").value;
+
+    if(mode === "reset"){
+      if(!password || password.length < 6){ showAuthError("Password must be at least 6 characters."); return; }
+      document.getElementById("authSubmitBtn").disabled = true;
+      try{
+        const { error } = await sb.auth.updateUser({ password });
+        if(error){ showAuthError(error.message); return; }
+        const { data: { user } } = await sb.auth.getUser();
+        currentUser = user;
+        currentProfile = await loadProfile(currentUser.id);
+        if(currentProfile.status !== "Approved"){
+          const msg = new NotApprovedError(currentProfile.status).message;
+          await sb.auth.signOut();
+          currentUser = null; currentProfile = null;
+          setAuthMode("login");
+          showAuthError(msg);
+          return;
+        }
+        toast("Password updated.");
+        await startApp();
+      }catch(err){
+        showAuthError(err.message || "Something went wrong.");
+      }finally{
+        document.getElementById("authSubmitBtn").disabled = false;
+      }
+      return;
+    }
+
+    const email = document.getElementById("auth_email").value.trim();
     const name = document.getElementById("auth_name").value.trim();
     if(!email || !password){ showAuthError("Email and password are required."); return; }
     if(mode === "signup" && !name){ showAuthError("Please enter your name."); return; }
