@@ -254,7 +254,8 @@ let DB = {
   ledgerManual: [], // {date,account,particulars,debit,credit}
   invoices: [],  // {id,date,customer,description,amount,gstPct,status}
   expenses: [],  // {id,date,category,description,amount,paidVia}
-  attendance: [], // {date,empId,status}
+  attendance: [], // {date,empId,status} — manual status override only
+  attendanceSessions: [], // {id,empId,date,punchIn,punchOut} — actual punch data, read-only from the client
   leaves: [],    // {id,empId,fromDate,toDate,type,reason,status}
   leads: [],     // {id,name,company,contact,stage,value,nextFollowUp,notes}
   ledgerAccounts: [], // Chart of Accounts
@@ -305,8 +306,8 @@ const TABLE_CONFIG = {
     toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null}),
     fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||''}) },
   payroll:      { table:"payroll",
-    toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds}),
-    fromRow:r=>({id:r.id,month:r.month,year:r.year,empId:r.emp_id,leaves:Number(r.leaves),tds:Number(r.tds)}) },
+    toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds,lop_hours:p.lopHours||0}),
+    fromRow:r=>({id:r.id,month:r.month,year:r.year,empId:r.emp_id,leaves:Number(r.leaves),tds:Number(r.tds),lopHours:Number(r.lop_hours||0)}) },
   payments:     { table:"payments",
     toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,amount_paid:p.amountPaid,payment_date:p.paymentDate||null,mode:p.mode,advance_given:p.advanceGiven,advance_recovered:p.advanceRecovered,remarks:p.remarks}),
     fromRow:r=>({id:r.id,month:r.month,year:r.year,empId:r.emp_id,amountPaid:Number(r.amount_paid),paymentDate:r.payment_date,mode:r.mode,advanceGiven:Number(r.advance_given),advanceRecovered:Number(r.advance_recovered),remarks:r.remarks}) },
@@ -400,6 +401,15 @@ async function loadDB(){
       const { data, error } = await sb.from(cfg.table).select("*");
       if(error){ toast("Load failed (" + key + "): " + error.message, true); DB[key] = []; continue; }
       DB[key] = (data || []).map(cfg.fromRow);
+    }
+
+    const { data: sessionRows, error: sessErr } = await sb.from("attendance_sessions").select("*");
+    if(sessErr){
+      console.error("Could not load attendance_sessions:", sessErr);
+      toast("Could not load punch sessions: " + sessErr.message + " — you may need to run the attendance_sessions migration SQL.", true);
+      DB.attendanceSessions = [];
+    } else {
+      DB.attendanceSessions = (sessionRows || []).map(r=>({id:r.id, empId:r.emp_id, date:r.date, punchIn:r.punch_in, punchOut:r.punch_out}));
     }
 
     if(DB.employees.length === 0){
@@ -518,7 +528,8 @@ function computePayroll(entry){
   if(!emp) return null;
   const totalDays = daysInMonth(entry.year, entry.month);
   const avail = availableDays(emp.doj, entry.year, entry.month, totalDays);
-  const payable = Math.max(0, avail - (entry.leaves||0));
+  const lopDays = (entry.lopHours||0) / ATTENDANCE_TARGET_HOURS;
+  const payable = Math.max(0, avail - (entry.leaves||0) - lopDays);
   const basicEarned = emp.basic/totalDays*payable;
   const hraEarned = emp.hra/totalDays*payable;
   const otherEarned = emp.other/totalDays*payable;
@@ -533,7 +544,7 @@ function computePayroll(entry){
   const totalDed = pfEmp+esiEmp+pt+tds;
   const netPay = gross-totalDed;
   const employerCost = gross+pfEr+esiEr;
-  return {emp, totalDays, avail, payable, basicEarned, hraEarned, otherEarned, gross,
+  return {emp, totalDays, avail, payable, lopDays, basicEarned, hraEarned, otherEarned, gross,
     pfEmp, pfEr, esiEmp, esiEr, pt, tds, totalDed, netPay, employerCost};
 }
 
@@ -686,8 +697,9 @@ function renderDashboard(){
 function renderMyDashboard(){
   const emp = DB.employees.find(e=>e.id===currentEmpId);
   const today = new Date().toISOString().slice(0,10);
-  const todayRec = DB.attendance.find(a=>a.date===today && a.empId===currentEmpId);
-  const status = todayRec ? (todayRec.punchOut ? "Punched Out" : todayRec.punchIn ? "Punched In" : "Not marked") : "Not marked";
+  const todaySessions = sessionsForDay(currentEmpId, today);
+  const openSession = todaySessions.find(s=>!s.punchOut);
+  const status = openSession ? "Punched In" : (todaySessions.length ? `Punched Out (${formatHours(hoursForDay(currentEmpId, today))} today)` : "Not marked");
   return `
   <div class="grid grid-2">
     <div class="stat"><div class="lbl">Today's Attendance</div><div class="val">${status}</div></div>
@@ -906,7 +918,11 @@ function renderPayroll(){
   const activeEmployees = DB.employees; // include inactive too, in case of mid-month exits; simplest: show all
   const entries = activeEmployees.map(emp=>{
     let entry = DB.payroll.find(p=>p.month===payrollPeriod.month&&p.year===payrollPeriod.year&&p.empId===emp.id);
-    if(!entry) entry = {month:payrollPeriod.month, year:payrollPeriod.year, empId:emp.id, leaves:0, tds:0};
+    if(!entry){
+      const shortfall = computeMonthlyShortfall(emp.id, payrollPeriod.month, payrollPeriod.year);
+      const suggestedLop = shortfall >= ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS ? shortfall : 0;
+      entry = {month:payrollPeriod.month, year:payrollPeriod.year, empId:emp.id, leaves:0, tds:0, lopHours: Math.round(suggestedLop*100)/100};
+    }
     return entry;
   });
   const results = entries.map(computePayroll).filter(Boolean);
@@ -918,6 +934,7 @@ function renderPayroll(){
       <td class="num">${r.totalDays}</td>
       <td class="num">${r.avail}</td>
       <td class="num"><input type="number" min="0" class="badge-input leavesInput" value="${entries.find(e=>e.empId===r.emp.id).leaves}" data-emp="${r.emp.id}"></td>
+      <td class="num"><input type="number" min="0" step="0.25" class="badge-input lopInput" value="${entries.find(e=>e.empId===r.emp.id).lopHours||0}" data-emp="${r.emp.id}" title="Auto-suggested from attendance shortfall — editable"></td>
       <td class="num">${r.payable}</td>
       <td class="num">${fmt(r.gross)}</td>
       <td class="num">${fmt(r.pfEmp)}</td>
@@ -930,7 +947,7 @@ function renderPayroll(){
   return `
   <div class="card">
     <h2>Payroll — ${monthName(payrollPeriod.month)} ${payrollPeriod.year}</h2>
-    <div class="sub">Enter Leaves (and TDS if applicable) — everything else calculates automatically.</div>
+    <div class="sub">Enter Leaves (and TDS if applicable) — everything else calculates automatically. LOP Hours is auto-suggested from attendance shortfall (${ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS}h+ monthly shortfall) but you can adjust it before saving.</div>
     <div class="row">
       <div class="field" style="max-width:140px;"><label>Month</label><select id="payMonth">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===payrollPeriod.month?'selected':''}>${monthName(m)}</option>`).join("")}</select></div>
       <div class="field" style="max-width:120px;"><label>Year</label><input type="number" id="payYear" value="${payrollPeriod.year}"></div>
@@ -940,9 +957,9 @@ function renderPayroll(){
     <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="payrollSearchInput" placeholder="Search by employee name or ID… (filters view only, doesn't affect totals)"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>Total Days</th><th>Available</th><th>Leaves</th><th>Payable</th><th>Gross Earned</th><th>PF (Emp)</th><th>ESI (Emp)</th><th>PT</th><th>TDS</th><th>Net Pay</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="12" class="empty">No employees found.</td></tr>`}</tbody>
-        <tfoot><tr><td colspan="6"><b>Total</b></td><td class="num"><b>${fmt(totals.gross)}</b></td><td colspan="3"></td><td></td><td class="num"><b>${fmt(totals.net)}</b></td></tr></tfoot>
+        <thead><tr><th>ID</th><th>Name</th><th>Total Days</th><th>Available</th><th>Leaves</th><th>LOP Hours</th><th>Payable</th><th>Gross Earned</th><th>PF (Emp)</th><th>ESI (Emp)</th><th>PT</th><th>TDS</th><th>Net Pay</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="13" class="empty">No employees found.</td></tr>`}</tbody>
+        <tfoot><tr><td colspan="7"><b>Total</b></td><td class="num"><b>${fmt(totals.gross)}</b></td><td colspan="3"></td><td></td><td class="num"><b>${fmt(totals.net)}</b></td></tr></tfoot>
       </table>
     </div>
   </div>`;
@@ -1759,6 +1776,15 @@ function renderAccounting(){
 
 // ============================= ATTENDANCE =============================
 let attDate = null;
+
+// Daily hours required to count as a full Present day. Also the unit used
+// to convert LOP hours into "days" for payroll (see computePayroll).
+const ATTENDANCE_TARGET_HOURS = 9;
+const ATTENDANCE_HALF_DAY_MIN_HOURS = 4;
+// Monthly cumulative shortfall below this is just a dashboard notice;
+// at or above this, it becomes a Loss-of-Pay suggestion in Payroll.
+const ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS = 4;
+
 function hoursBetween(inTs, outTs){
   if(!inTs || !outTs) return null;
   const ms = new Date(outTs) - new Date(inTs);
@@ -1767,12 +1793,69 @@ function hoursBetween(inTs, outTs){
   const m = Math.round((ms%3600000)/60000);
   return `${h}h ${m}m`;
 }
-function deriveStatus(rec){
-  if(!rec) return "Absent";
-  if(rec.status && rec.status !== "Present") return rec.status; // manual override (On Leave, Half Day, Absent) wins
-  if(rec.punchIn && !rec.punchOut) return "Present (working)";
-  if(rec.punchIn && rec.punchOut) return "Present";
+function formatHours(hrs){
+  const h = Math.floor(hrs);
+  const m = Math.round((hrs-h)*60);
+  return `${h}h ${m}m`;
+}
+
+function sessionsForDay(empId, dateStr){
+  return DB.attendanceSessions.filter(s=>s.empId===empId && s.date===dateStr).sort((a,b)=>a.punchIn.localeCompare(b.punchIn));
+}
+
+// Sums all sessions for that day. An open (still-punched-in) session counts
+// its elapsed time so far, capped at the end of that calendar day so a
+// forgotten punch-out on an old date can't produce runaway hours.
+function hoursForDay(empId, dateStr){
+  const sessions = sessionsForDay(empId, dateStr);
+  const endOfDay = new Date(dateStr+"T23:59:59.999");
+  let totalMs = 0;
+  sessions.forEach(s=>{
+    const inTime = new Date(s.punchIn);
+    let outTime = s.punchOut ? new Date(s.punchOut) : new Date();
+    if(outTime > endOfDay) outTime = endOfDay;
+    if(outTime > inTime) totalMs += (outTime - inTime);
+  });
+  return totalMs / 3600000;
+}
+
+function deriveAutoStatus(hours, hasSessions){
+  if(!hasSessions) return "Absent";
+  if(hours >= ATTENDANCE_TARGET_HOURS) return "Present";
+  if(hours >= ATTENDANCE_HALF_DAY_MIN_HOURS) return "Half Day";
   return "Absent";
+}
+
+// Manual override (anything other than the default "Present") always wins;
+// otherwise status is auto-derived from actual hours worked that day.
+function statusForDay(empId, dateStr){
+  const override = DB.attendance.find(a=>a.date===dateStr && a.empId===empId);
+  if(override && override.status && override.status !== "Present") return override.status;
+  const sessions = sessionsForDay(empId, dateStr);
+  return deriveAutoStatus(hoursForDay(empId, dateStr), sessions.length>0);
+}
+
+function isOnApprovedLeave(empId, dateStr){
+  return DB.leaves.some(l=>l.empId===empId && l.status==="Approved" && l.fromDate<=dateStr && l.toDate>=dateStr);
+}
+
+// Running total of (target hours − actual hours) across this month's working
+// days so far (Sundays and approved-leave days excluded, future days excluded).
+function computeMonthlyShortfall(empId, month, year){
+  const emp = DB.employees.find(e=>e.id===empId);
+  if(!emp) return 0;
+  const totalDays = daysInMonth(year, month);
+  const todayStr = new Date().toISOString().slice(0,10);
+  let shortfall = 0;
+  for(let d=1; d<=totalDays; d++){
+    const dateStr = `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    if(dateStr > todayStr) break;
+    if(dateStr < emp.doj) continue;
+    if(new Date(dateStr+"T00:00:00").getDay() === 0) continue; // Sunday
+    if(isOnApprovedLeave(empId, dateStr)) continue;
+    shortfall += Math.max(0, ATTENDANCE_TARGET_HOURS - hoursForDay(empId, dateStr));
+  }
+  return shortfall;
 }
 
 function renderAttendance(){
@@ -1783,30 +1866,36 @@ function renderAttendance(){
   }
 
   const rows = DB.employees.map(e=>{
-    const rec = DB.attendance.find(a=>a.date===attDate&&a.empId===e.id);
-    const status = rec ? (rec.status || "Present") : "Present";
+    const sessions = sessionsForDay(e.id, attDate);
+    const hrs = hoursForDay(e.id, attDate);
+    const override = DB.attendance.find(a=>a.date===attDate&&a.empId===e.id);
+    const dropdownValue = (override && override.status) || "Present";
+    const first = sessions[0];
+    const last = sessions[sessions.length-1];
     return `<tr data-emp="${e.id}" data-search="${escapeHtml((e.id+' '+e.name).toLowerCase())}">
       <td>${e.id}</td><td>${e.name}</td>
-      <td>${rec && rec.punchIn ? new Date(rec.punchIn).toLocaleTimeString() : '<span class="helptext">—</span>'}</td>
-      <td>${rec && rec.punchOut ? new Date(rec.punchOut).toLocaleTimeString() : '<span class="helptext">—</span>'}</td>
-      <td>${hoursBetween(rec&&rec.punchIn, rec&&rec.punchOut) || '<span class="helptext">—</span>'}</td>
+      <td>${first ? new Date(first.punchIn).toLocaleTimeString() : '<span class="helptext">—</span>'}</td>
+      <td>${last && last.punchOut ? new Date(last.punchOut).toLocaleTimeString() : (last ? '<span class="helptext">still in</span>' : '<span class="helptext">—</span>')}</td>
+      <td>${sessions.length}</td>
+      <td>${sessions.length ? formatHours(hrs) : '<span class="helptext">—</span>'}</td>
+      <td>${statusForDay(e.id, attDate)}</td>
       <td>
         <select class="attStatus" data-emp="${e.id}">
-          ${["Present","Absent","Half Day","On Leave"].map(s=>`<option ${s===status?'selected':''}>${s}</option>`).join("")}
+          ${["Present","Absent","Half Day","On Leave"].map(s=>`<option ${s===dropdownValue?'selected':''}>${s}</option>`).join("")}
         </select>
       </td>
     </tr>`;
   }).join("");
 
-  const summary = ["Present","Absent","Half Day","On Leave"].map(s=>{
-    const count = DB.attendance.filter(a=>a.date===attDate&&(a.status||"Present")===s).length;
+  const summary = ["Present","Half Day","Absent","On Leave"].map(s=>{
+    const count = DB.employees.filter(e=>statusForDay(e.id, attDate)===s).length;
     return `<div class="stat"><div class="lbl">${s}</div><div class="val">${count}</div></div>`;
   }).join("");
 
   return `
   <div class="card">
     <h2>Daily Attendance</h2>
-    <div class="sub">Employees punch in/out themselves when they log in. Use this to review any day or override a status (e.g. On Leave, Absent) — the Status dropdown always wins over punch times.</div>
+    <div class="sub">Status is auto-calculated from actual hours worked (≥${ATTENDANCE_TARGET_HOURS}h Present, ${ATTENDANCE_HALF_DAY_MIN_HOURS}–${ATTENDANCE_TARGET_HOURS}h Half Day, under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h Absent). Use the dropdown to override a specific day (e.g. On Leave) — it always wins over the auto-calculated status.</div>
     <div class="row">
       <div class="field" style="max-width:160px;"><label>Date</label><input type="date" id="attDateInput" value="${attDate}"></div>
       <button class="btn ghost" id="loadAttBtn">Load</button>
@@ -1816,8 +1905,8 @@ function renderAttendance(){
     <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="attSearchInput" placeholder="Search by employee name or ID… (filters view only)"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>Punch In</th><th>Punch Out</th><th>Hours</th><th>Status</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">No employees found.</td></tr>`}</tbody>
+        <thead><tr><th>ID</th><th>Name</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th><th>Override</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="empty">No employees found.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -1829,33 +1918,42 @@ function renderMyAttendance(){
     return `<div class="card"><div class="empty">Your login isn't linked to an employee record yet. Ask your Admin to link you in the Team tab.</div></div>`;
   }
   const today = new Date().toISOString().slice(0,10);
-  const todayRec = DB.attendance.find(a=>a.date===today && a.empId===currentEmpId);
+  const todaySessions = sessionsForDay(currentEmpId, today);
+  const openSession = todaySessions.find(s=>!s.punchOut);
+  const todayHours = hoursForDay(currentEmpId, today);
 
-  const history = DB.attendance.filter(a=>a.empId===currentEmpId)
-    .sort((a,b)=>b.date.localeCompare(a.date))
-    .slice(0,14);
-  const historyRows = history.map(a=>`
-    <tr><td>${a.date}</td>
-      <td>${a.punchIn ? new Date(a.punchIn).toLocaleTimeString() : '—'}</td>
-      <td>${a.punchOut ? new Date(a.punchOut).toLocaleTimeString() : '—'}</td>
-      <td>${hoursBetween(a.punchIn, a.punchOut) || '—'}</td>
-      <td>${deriveStatus(a)}</td>
-    </tr>`).join("");
+  const historyDates = Array.from(new Set(DB.attendanceSessions.filter(s=>s.empId===currentEmpId).map(s=>s.date)))
+    .sort((a,b)=>b.localeCompare(a)).slice(0,14);
+  const historyRows = historyDates.map(d=>{
+    const sessions = sessionsForDay(currentEmpId, d);
+    const first = sessions[0], last = sessions[sessions.length-1];
+    return `<tr><td>${d}</td>
+      <td>${first ? new Date(first.punchIn).toLocaleTimeString() : '—'}</td>
+      <td>${last && last.punchOut ? new Date(last.punchOut).toLocaleTimeString() : (last ? 'still in' : '—')}</td>
+      <td>${sessions.length}</td>
+      <td>${formatHours(hoursForDay(currentEmpId, d))}</td>
+      <td>${statusForDay(currentEmpId, d)}</td>
+    </tr>`;
+  }).join("");
 
   let actionHtml;
-  if(!todayRec || !todayRec.punchIn){
-    actionHtml = `<button class="btn gold" id="punchInBtn">Punch In</button>`;
-  } else if(!todayRec.punchOut){
+  if(openSession){
     actionHtml = `
-      <p>You punched in at <b>${new Date(todayRec.punchIn).toLocaleTimeString()}</b>.</p>
+      <p>You punched in at <b>${new Date(openSession.punchIn).toLocaleTimeString()}</b> (session ${todaySessions.length} today).</p>
       <button class="btn gold" id="punchOutBtn">Punch Out</button>`;
   } else {
     actionHtml = `
-      <p>Last session: in at <b>${new Date(todayRec.punchIn).toLocaleTimeString()}</b>,
-      out at <b>${new Date(todayRec.punchOut).toLocaleTimeString()}</b>
-      (<b>${hoursBetween(todayRec.punchIn, todayRec.punchOut)}</b>).</p>
-      <p class="helptext">You can punch in again if you're back at the office (e.g. after lunch or a meeting).</p>
+      ${todaySessions.length ? `<p>${todaySessions.length} session(s) so far today, <b>${formatHours(todayHours)}</b> total.</p><p class="helptext">You can punch in again if you're back at the office (e.g. after lunch or a meeting).</p>` : ''}
       <button class="btn gold" id="punchInBtn">Punch In</button>`;
+  }
+
+  const now = new Date();
+  const shortfall = computeMonthlyShortfall(currentEmpId, now.getMonth()+1, now.getFullYear());
+  let shortfallHtml = "";
+  if(shortfall >= 0.05){
+    shortfallHtml = shortfall >= ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS
+      ? `<p class="helptext" style="color:var(--danger);">You're short by <b>${formatHours(shortfall)}</b> this month — this may result in a Loss-of-Pay deduction unless made up before month end.</p>`
+      : `<p class="helptext" style="color:var(--warn);">You're short by <b>${formatHours(shortfall)}</b> this month. Try to make it up in the remaining working days.</p>`;
   }
 
   const deviceRows = myDevices.map(d=>`
@@ -1868,9 +1966,10 @@ function renderMyAttendance(){
   return `
   <div class="card">
     <h2>My Attendance — ${today}</h2>
-    <div class="sub">Punch in when you start work, punch out when you finish. Requires your fingerprint and being at the office.</div>
+    <div class="sub">Punch in when you start work, punch out when you finish. Requires your fingerprint and being at the office. A full day is ${ATTENDANCE_TARGET_HOURS}h — under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h counts as Absent.</div>
     ${myDevices.length === 0 ? `<p class="helptext">No fingerprint enrolled on this device yet — enroll it first.</p>` : ''}
     ${actionHtml}
+    ${shortfallHtml}
   </div>
   <div class="card">
     <h2>My Fingerprint Devices</h2>
@@ -1890,8 +1989,8 @@ function renderMyAttendance(){
     <h2>My Recent Attendance</h2>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Date</th><th>Punch In</th><th>Punch Out</th><th>Hours</th><th>Status</th></tr></thead>
-        <tbody>${historyRows || `<tr><td colspan="5" class="empty">No attendance recorded yet.</td></tr>`}</tbody>
+        <thead><tr><th>Date</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th></tr></thead>
+        <tbody>${historyRows || `<tr><td colspan="6" class="empty">No attendance recorded yet.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -2447,13 +2546,23 @@ const REPORT_DEFS = {
     }
   },
   attendance: {
-    label: "Attendance", headers: ["Date","Emp ID","Name","Status"],
+    label: "Attendance", headers: ["Date","Emp ID","Name","Sessions","Total Hours","Status"],
     dateNote: "Filtered by attendance date.",
     rows(from,to){
-      return DB.attendance.filter(a=>dateInRange(a.date, from, to)).map(a=>{
-        const emp = DB.employees.find(e=>e.id===a.empId);
-        return [a.date,a.empId,emp?emp.name:"",a.status];
+      const dates = new Set([...DB.attendanceSessions.map(s=>s.date), ...DB.attendance.map(a=>a.date)]);
+      const out = [];
+      Array.from(dates).filter(d=>dateInRange(d, from, to)).sort().forEach(date=>{
+        const empIds = new Set([
+          ...DB.attendanceSessions.filter(s=>s.date===date).map(s=>s.empId),
+          ...DB.attendance.filter(a=>a.date===date).map(a=>a.empId),
+        ]);
+        empIds.forEach(empId=>{
+          const emp = DB.employees.find(e=>e.id===empId);
+          const sessions = sessionsForDay(empId, date);
+          out.push([date, empId, emp?emp.name:"", sessions.length, round2(hoursForDay(empId,date)), statusForDay(empId,date)]);
+        });
       });
+      return out;
     }
   },
   leaves: {
@@ -2865,6 +2974,9 @@ function attachHandlers(){
       });
       document.querySelectorAll(".tdsInput").forEach(inp=>{
         upsertPayroll(payrollPeriod.month, payrollPeriod.year, inp.dataset.emp, {tds: parseFloat(inp.value)||0});
+      });
+      document.querySelectorAll(".lopInput").forEach(inp=>{
+        upsertPayroll(payrollPeriod.month, payrollPeriod.year, inp.dataset.emp, {lopHours: parseFloat(inp.value)||0});
       });
       await save("payroll");
       await logAudit("update", "payroll", `${payrollPeriod.month}/${payrollPeriod.year}`, null);
