@@ -38,7 +38,13 @@
   .grid-4{grid-template-columns:repeat(4,1fr);}
   .grid-3{grid-template-columns:repeat(3,1fr);}
   .grid-2{grid-template-columns:repeat(2,1fr);}
+  .grid > *{min-width:0;}
+  @media(max-width:1024px){.grid-4{grid-template-columns:repeat(2,1fr);}}
   @media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr);}.grid-3{grid-template-columns:repeat(2,1fr);}.grid-2{grid-template-columns:1fr;}main{padding:12px;}}
+  @media(max-width:768px){
+    .grid-3{grid-template-columns:1fr;}
+    .hide-tablet{display:none !important;}
+  }
   @media(max-width:560px){
     .grid-4{grid-template-columns:1fr;}
     header.topbar{padding:10px 12px;flex-direction:column;align-items:stretch;gap:8px;}
@@ -49,9 +55,21 @@
     th,td{padding:6px 7px;font-size:12px;}
     .row{flex-direction:column;align-items:stretch;}
     .row .field{max-width:none !important;}
+    .row .btn, .row label.btn{width:100%;text-align:center;}
     .payslip .head .brand-row img.wordmark{height:18px;}
     .app-footer{padding:14px 10px;font-size:11px;}
+    .hide-mobile{display:none !important;}
   }
+  .tablewrap{position:relative;}
+  .tablewrap.scrollable::after{
+    content:"";position:absolute;top:0;right:0;bottom:0;width:24px;pointer-events:none;
+    background:linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,.06));
+  }
+  .table-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+  .table-toolbar input[type="text"], .table-toolbar select{width:auto;min-width:160px;}
+  .table-toolbar .search-field{flex:1;min-width:180px;}
+  .bulk-actions{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  input[type="checkbox"]{width:auto;padding:0;}
   .app-footer{background:var(--navy);color:#cfd7e3;text-align:center;padding:16px 20px;font-size:12.5px;margin-top:20px;}
   .app-footer a{color:var(--gold-light);text-decoration:none;}
   .app-footer a:hover{text-decoration:underline;}
@@ -585,6 +603,28 @@ function renderAll(){
   else if(activeTab==="Reports") main.innerHTML = renderReports();
   else if(activeTab==="Team") main.innerHTML = renderTeam();
   attachHandlers();
+  markScrollableTables();
+}
+
+// For tables with bulk-edit inputs (Payroll, Payments, Attendance) — filtering must
+// hide/show rows in place rather than re-render, or unsaved edits in other rows get lost.
+function wireLiveRowFilter(inputId){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  input.oninput = ()=>{
+    const q = input.value.trim().toLowerCase();
+    const table = input.closest(".card").querySelector("table");
+    if(!table) return;
+    table.querySelectorAll("tbody tr[data-search]").forEach(tr=>{
+      tr.style.display = (!q || tr.dataset.search.includes(q)) ? "" : "none";
+    });
+  };
+}
+
+function markScrollableTables(){
+  document.querySelectorAll(".tablewrap").forEach(el=>{
+    el.classList.toggle("scrollable", el.scrollWidth > el.clientWidth + 2);
+  });
 }
 
 // ============================= DASHBOARD =============================
@@ -768,21 +808,31 @@ async function importEmployeesCsv(text){
   renderAll();
 }
 
+let employeeSearch = "";
+let employeeStatusFilter = "";
+let selectedEmployeeIds = new Set();
+
 function renderEmployees(){
-  const sorted = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id));
-  const { pageItems, page, totalPages, total } = paginate(sorted, "employees", 20);
+  let filtered = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id));
+  if(employeeStatusFilter) filtered = filtered.filter(e=>e.status===employeeStatusFilter);
+  if(employeeSearch.trim()){
+    const q = employeeSearch.trim().toLowerCase();
+    filtered = filtered.filter(e=>[e.id,e.name,e.email].some(v=>v && v.toLowerCase().includes(q)));
+  }
+  const { pageItems, page, totalPages, total } = paginate(filtered, "employees", 20);
   const rows = pageItems.map(e=>`
     <tr data-id="${e.id}">
+      <td><input type="checkbox" class="rowCheck empCheck" data-id="${e.id}" ${selectedEmployeeIds.has(e.id)?'checked':''}></td>
       <td>${e.id}</td>
       <td>${e.name}</td>
       <td>${e.doj}</td>
-      <td>${e.dob||'—'}</td>
+      <td class="hide-tablet">${e.dob||'—'}</td>
       <td>${e.email||'—'}</td>
-      <td>${e.resignDate||'—'}</td>
+      <td class="hide-tablet">${e.resignDate||'—'}</td>
       <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span></td>
-      <td class="num">${fmt0(e.basic)}</td>
-      <td class="num">${fmt0(e.hra)}</td>
-      <td class="num">${fmt0(e.other)}</td>
+      <td class="num hide-tablet">${fmt0(e.basic)}</td>
+      <td class="num hide-tablet">${fmt0(e.hra)}</td>
+      <td class="num hide-tablet">${fmt0(e.other)}</td>
       <td class="num"><b>${fmt0(e.basic+e.hra+e.other)}</b></td>
       <td class="actions">
         <button class="btn ghost sm editEmpBtn">Edit</button>
@@ -797,10 +847,19 @@ function renderEmployees(){
       <button class="btn ghost" id="downloadCsvTemplateBtn">Download CSV Template</button>
       <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importCsvInput" accept=".csv" style="display:none;"></label>
     </div>
+    <div class="table-toolbar">
+      <div class="field search-field" style="margin:0;"><input type="text" id="empSearchInput" placeholder="Search by ID, name or email…" value="${escapeHtml(employeeSearch)}"></div>
+      <select id="empStatusFilter">
+        <option value="">All Statuses</option>
+        <option value="Active" ${employeeStatusFilter==='Active'?'selected':''}>Active</option>
+        <option value="Inactive" ${employeeStatusFilter==='Inactive'?'selected':''}>Inactive</option>
+      </select>
+    </div>
+    ${selectedEmployeeIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedEmployeeIds.size} selected</span><button class="btn danger sm" id="bulkDeleteEmpBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Emp ID</th><th>Name</th><th>DOJ</th><th>DOB</th><th>Email</th><th>Resigned</th><th>Status</th><th>Basic</th><th>HRA</th><th>Other</th><th>Gross</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="12" class="empty">No employees yet — add one below.</td></tr>`}</tbody>
+        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th>DOJ</th><th class="hide-tablet">DOB</th><th>Email</th><th class="hide-tablet">Resigned</th><th>Status</th><th class="hide-tablet">Basic</th><th class="hide-tablet">HRA</th><th class="hide-tablet">Other</th><th>Gross</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="13" class="empty">No employees match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("employees", page, totalPages, total)}
@@ -842,7 +901,7 @@ function renderPayroll(){
   const totals = results.reduce((a,r)=>({gross:a.gross+r.gross,net:a.net+r.netPay,ded:a.ded+r.totalDed}),{gross:0,net:0,ded:0});
 
   const rows = results.map(r=>`
-    <tr data-emp="${r.emp.id}">
+    <tr data-emp="${r.emp.id}" data-search="${escapeHtml((r.emp.id+' '+r.emp.name).toLowerCase())}">
       <td>${r.emp.id}</td><td>${r.emp.name}</td>
       <td class="num">${r.totalDays}</td>
       <td class="num">${r.avail}</td>
@@ -866,6 +925,7 @@ function renderPayroll(){
       <button class="btn ghost" id="loadPeriodBtn">Load</button>
       <button class="btn gold" id="savePayrollBtn">Save This Month's Payroll</button>
     </div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="payrollSearchInput" placeholder="Search by employee name or ID… (filters view only, doesn't affect totals)"></div></div>
     <div class="tablewrap">
       <table>
         <thead><tr><th>ID</th><th>Name</th><th>Total Days</th><th>Available</th><th>Leaves</th><th>Payable</th><th>Gross Earned</th><th>PF (Emp)</th><th>ESI (Emp)</th><th>PT</th><th>TDS</th><th>Net Pay</th></tr></thead>
@@ -896,7 +956,7 @@ function renderPayments(){
       advBal += (pp.advanceGiven||0) - (pp.advanceRecovered||0);
       if(p.month===pe.month && p.year===pe.year) break;
     }
-    return `<tr data-emp="${pe.empId}">
+    return `<tr data-emp="${pe.empId}" data-search="${escapeHtml((pe.empId+' '+calc.emp.name).toLowerCase())}">
       <td>${pe.empId}</td><td>${calc.emp.name}</td>
       <td class="num">${fmt(calc.netPay)}</td>
       <td class="num"><input type="number" class="badge-input advGivenInput" value="${pay.advanceGiven||0}" data-emp="${pe.empId}"></td>
@@ -921,6 +981,7 @@ function renderPayments(){
       <button class="btn ghost" id="loadPayTrBtn">Load</button>
       <button class="btn gold" id="savePaymentsBtn">Save Payments</button>
     </div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="paymentsSearchInput" placeholder="Search by employee name or ID… (filters view only)"></div></div>
     <div class="tablewrap">
       <table>
         <thead><tr><th>ID</th><th>Name</th><th>Net Payable</th><th>Advance Given</th><th>Advance Recovered</th><th>Amount Paid</th><th>Payment Date</th><th>Mode</th><th>Salary Balance</th><th>Advance Balance</th></tr></thead>
@@ -1712,7 +1773,7 @@ function renderAttendance(){
   const rows = DB.employees.map(e=>{
     const rec = DB.attendance.find(a=>a.date===attDate&&a.empId===e.id);
     const status = rec ? (rec.status || "Present") : "Present";
-    return `<tr data-emp="${e.id}">
+    return `<tr data-emp="${e.id}" data-search="${escapeHtml((e.id+' '+e.name).toLowerCase())}">
       <td>${e.id}</td><td>${e.name}</td>
       <td>${rec && rec.punchIn ? new Date(rec.punchIn).toLocaleTimeString() : '<span class="helptext">—</span>'}</td>
       <td>${rec && rec.punchOut ? new Date(rec.punchOut).toLocaleTimeString() : '<span class="helptext">—</span>'}</td>
@@ -1740,6 +1801,7 @@ function renderAttendance(){
       <button class="btn gold" id="saveAttBtn">Save Status Overrides</button>
     </div>
     <div class="grid grid-4">${summary}</div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="attSearchInput" placeholder="Search by employee name or ID… (filters view only)"></div></div>
     <div class="tablewrap">
       <table>
         <thead><tr><th>ID</th><th>Name</th><th>Punch In</th><th>Punch Out</th><th>Hours</th><th>Status</th></tr></thead>
@@ -2014,16 +2076,30 @@ function leaveBalance(empId, year){
   };
 }
 
+let leaveSearch = "";
+let leaveStatusFilter = "";
+let selectedLeaveIds = new Set();
+
 function renderLeaves(){
   const scoped = currentRole==="Employee";
   const empId = scoped ? currentEmpId : null;
-  const list = (scoped ? DB.leaves.filter(l=>l.empId===empId) : DB.leaves.slice())
+  let list = (scoped ? DB.leaves.filter(l=>l.empId===empId) : DB.leaves.slice())
     .sort((a,b)=>b.fromDate.localeCompare(a.fromDate));
+
+  if(!scoped && leaveStatusFilter) list = list.filter(l=>l.status===leaveStatusFilter);
+  if(!scoped && leaveSearch.trim()){
+    const q = leaveSearch.trim().toLowerCase();
+    list = list.filter(l=>{
+      const emp = DB.employees.find(e=>e.id===l.empId);
+      return [l.empId, emp?emp.name:'', l.reason].some(v=>v && v.toLowerCase().includes(q));
+    });
+  }
 
   const { pageItems: leavePage, page: lvPage, totalPages: lvTotalPages, total: lvTotal } = paginate(list, "leaves", 20);
   const rows = leavePage.map(l=>{
     const emp = DB.employees.find(e=>e.id===l.empId);
     return `<tr data-id="${l.id}">
+      ${scoped ? '' : `<td><input type="checkbox" class="rowCheck leaveCheck" data-id="${l.id}" ${selectedLeaveIds.has(l.id)?'checked':''}></td>`}
       <td>${l.empId}</td><td>${emp?emp.name:''}</td><td>${l.type}</td>
       <td>${l.fromDate}</td><td>${l.toDate}</td><td class="num">${leaveDays(l)}</td>
       <td>${l.reason||''}</td>
@@ -2057,10 +2133,19 @@ function renderLeaves(){
   </div>
   <div class="card">
     <h2>Leave Requests</h2>
+    ${scoped ? '' : `
+    <div class="table-toolbar">
+      <div class="field search-field" style="margin:0;"><input type="text" id="leaveSearchInput" placeholder="Search by employee or reason…" value="${escapeHtml(leaveSearch)}"></div>
+      <select id="leaveStatusFilter">
+        <option value="">All Statuses</option>
+        ${["Pending","Approved","Rejected"].map(s=>`<option value="${s}" ${leaveStatusFilter===s?'selected':''}>${s}</option>`).join("")}
+      </select>
+    </div>
+    ${selectedLeaveIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedLeaveIds.size} selected</span><button class="btn danger sm" id="bulkDeleteLeaveBtn">Delete Selected</button></div>` : ''}`}
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="9" class="empty">No leave requests yet.</td></tr>`}</tbody>
+        <thead><tr>${scoped?'':'<th><input type="checkbox" id="leaveCheckAll"></th>'}<th>ID</th><th>Name</th><th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="${scoped?9:10}" class="empty">No leave requests match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("leaves", lvPage, lvTotalPages, lvTotal)}
@@ -2079,6 +2164,10 @@ function renderLeaves(){
 }
 
 // ============================= CRM =============================
+let leadSearch = "";
+let leadStageFilter = "";
+let selectedLeadIds = new Set();
+
 function renderCRM(){
   const stages = ["New","Contacted","Qualified","Proposal","Won","Lost"];
   const summary = stages.map(s=>{
@@ -2091,10 +2180,16 @@ function renderCRM(){
   const followUps = DB.leads.filter(l=>l.nextFollowUp && new Date(l.nextFollowUp)<=soon && !["Won","Lost"].includes(l.stage))
     .sort((a,b)=>a.nextFollowUp.localeCompare(b.nextFollowUp));
 
-  const sortedLeads = DB.leads.slice().sort((a,b)=>(b.nextFollowUp||'').localeCompare(a.nextFollowUp||''));
+  let sortedLeads = DB.leads.slice().sort((a,b)=>(b.nextFollowUp||'').localeCompare(a.nextFollowUp||''));
+  if(leadStageFilter) sortedLeads = sortedLeads.filter(l=>l.stage===leadStageFilter);
+  if(leadSearch.trim()){
+    const q = leadSearch.trim().toLowerCase();
+    sortedLeads = sortedLeads.filter(l=>[l.name,l.company,l.contact,l.notes].some(v=>v && v.toLowerCase().includes(q)));
+  }
   const { pageItems: leadsPage, page: ldPage, totalPages: ldTotalPages, total: ldTotal } = paginate(sortedLeads, "leads", 20);
   const rows = leadsPage.map(l=>`
     <tr data-id="${l.id}">
+      <td><input type="checkbox" class="rowCheck leadCheck" data-id="${l.id}" ${selectedLeadIds.has(l.id)?'checked':''}></td>
       <td>${l.name}</td><td>${l.company||''}</td><td>${l.contact||''}</td>
       <td class="num">${fmt0(l.value||0)}</td>
       <td><select class="leadStage" data-id="${l.id}">${stages.map(s=>`<option ${s===l.stage?'selected':''}>${s}</option>`).join("")}</select></td>
@@ -2120,10 +2215,18 @@ function renderCRM(){
   </div>` : ''}
   <div class="card">
     <h2>Leads &amp; Contacts</h2>
+    <div class="table-toolbar">
+      <div class="field search-field" style="margin:0;"><input type="text" id="leadSearchInput" placeholder="Search by name, company, contact or notes…" value="${escapeHtml(leadSearch)}"></div>
+      <select id="leadStageFilter">
+        <option value="">All Stages</option>
+        ${stages.map(s=>`<option value="${s}" ${leadStageFilter===s?'selected':''}>${s}</option>`).join("")}
+      </select>
+    </div>
+    ${selectedLeadIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedLeadIds.size} selected</span><button class="btn danger sm" id="bulkDeleteLeadBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Name</th><th>Company</th><th>Contact</th><th>Value (₹)</th><th>Stage</th><th>Next Follow-up</th><th>Notes</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="empty">No leads yet — add one below.</td></tr>`}</tbody>
+        <thead><tr><th><input type="checkbox" id="leadCheckAll"></th><th>Name</th><th>Company</th><th>Contact</th><th>Value (₹)</th><th>Stage</th><th>Next Follow-up</th><th>Notes</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" class="empty">No leads match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("leads", ldPage, ldTotalPages, ldTotal)}
@@ -2388,9 +2491,18 @@ async function loadTeam(){
     invitedUsers = invites || [];
   }
 }
+let teamSearch = "";
+let teamRoleFilter = "";
+let selectedTeamIds = new Set();
+
 function renderTeam(){
   const pending = teamMembers.filter(p=>p.status==="Pending");
-  const others = teamMembers.filter(p=>p.status!=="Pending");
+  let others = teamMembers.filter(p=>p.status!=="Pending");
+  if(teamRoleFilter) others = others.filter(p=>p.role===teamRoleFilter);
+  if(teamSearch.trim()){
+    const q = teamSearch.trim().toLowerCase();
+    others = others.filter(p=>p.name && p.name.toLowerCase().includes(q));
+  }
 
   const pendingRows = pending.map(p=>`
     <tr data-id="${p.id}">
@@ -2409,6 +2521,7 @@ function renderTeam(){
   const { pageItems: othersPage, page: teamPage, totalPages: teamTotalPages, total: teamTotal } = paginate(others, "team", 20);
   const rows = othersPage.map(p=>`
     <tr data-id="${p.id}">
+      <td>${p.id===currentUser.id ? '' : `<input type="checkbox" class="rowCheck teamCheck" data-id="${p.id}" ${selectedTeamIds.has(p.id)?'checked':''}>`}</td>
       <td>${p.name}${p.id === currentUser.id ? " (you)" : ""}</td>
       <td>
         <select class="teamRoleSelect" data-id="${p.id}" ${p.id===currentUser.id?"disabled":""}>
@@ -2485,10 +2598,18 @@ function renderTeam(){
     <h2>Team &amp; Roles</h2>
     <div class="sub">Manage who has access and what they can see.</div>
     <p class="helptext">"Delete" here revokes their access to the app but does not delete their underlying login account — for that, remove them from Supabase → Authentication → Users directly.</p>
+    <div class="table-toolbar">
+      <div class="field search-field" style="margin:0;"><input type="text" id="teamSearchInput" placeholder="Search by name…" value="${escapeHtml(teamSearch)}"></div>
+      <select id="teamRoleFilter">
+        <option value="">All Roles</option>
+        ${Object.keys(ROLE_TABS).map(r=>`<option value="${r}" ${teamRoleFilter===r?'selected':''}>${r}</option>`).join("")}
+      </select>
+    </div>
+    ${selectedTeamIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedTeamIds.size} selected</span><button class="btn danger sm" id="bulkDeleteTeamBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Name</th><th>Role</th><th>Linked Employee (for "Employee" role)</th><th>Status</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5" class="empty">No approved team members yet.</td></tr>`}</tbody>
+        <thead><tr><th><input type="checkbox" id="teamCheckAll"></th><th>Name</th><th>Role</th><th>Linked Employee (for "Employee" role)</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No team members match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("team", teamPage, teamTotalPages, teamTotal)}
@@ -2633,6 +2754,41 @@ function attachHandlers(){
         "Emp ID,Name,DOJ,DOB,Email,Resigning Date,Status,Basic,HRA,Other\n,Jane Doe,2026-01-15,1995-04-20,jane@auzentis.com,,Active,7500,3000,4500\n",
         "text/csv;charset=utf-8;");
     };
+
+    document.getElementById("empSearchInput").oninput = (e)=>{
+      employeeSearch = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      paginationState["employees"] = 1;
+      renderAll();
+      const newInput = document.getElementById("empSearchInput");
+      if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+    };
+    document.getElementById("empStatusFilter").onchange = (e)=>{
+      employeeStatusFilter = e.target.value;
+      paginationState["employees"] = 1;
+      renderAll();
+    };
+    document.querySelectorAll(".empCheck").forEach(cb=>cb.onchange=()=>{
+      if(cb.checked) selectedEmployeeIds.add(cb.dataset.id); else selectedEmployeeIds.delete(cb.dataset.id);
+      renderAll();
+    });
+    const empCheckAll = document.getElementById("empCheckAll");
+    if(empCheckAll) empCheckAll.onchange = (e)=>{
+      const pageIds = Array.from(document.querySelectorAll(".empCheck")).map(cb=>cb.dataset.id);
+      pageIds.forEach(id=> e.target.checked ? selectedEmployeeIds.add(id) : selectedEmployeeIds.delete(id));
+      renderAll();
+    };
+    const bulkDelEmpBtn = document.getElementById("bulkDeleteEmpBtn");
+    if(bulkDelEmpBtn) bulkDelEmpBtn.onclick = async ()=>{
+      if(!confirm(`Delete ${selectedEmployeeIds.size} employee(s)? This cannot be undone.`)) return;
+      const ids = Array.from(selectedEmployeeIds);
+      DB.employees = DB.employees.filter(x=>!selectedEmployeeIds.has(x.id));
+      await save("employees");
+      await logAudit("bulk_delete", "employees", null, {ids});
+      selectedEmployeeIds.clear();
+      toast(`${ids.length} employee(s) deleted.`);
+      renderAll();
+    };
   }
 
   if(activeTab==="Payroll"){
@@ -2652,6 +2808,7 @@ function attachHandlers(){
       toast("Payroll saved for "+monthName(payrollPeriod.month)+" "+payrollPeriod.year+".");
       renderAll();
     };
+    wireLiveRowFilter("payrollSearchInput");
   }
 
   if(activeTab==="Payments"){
@@ -2675,6 +2832,7 @@ function attachHandlers(){
       toast("Payments saved for "+monthName(paymentsPeriod.month)+" "+paymentsPeriod.year+".");
       renderAll();
     };
+    wireLiveRowFilter("paymentsSearchInput");
   }
 
   if(activeTab==="Ledger"){
@@ -2965,6 +3123,7 @@ function attachHandlers(){
         toast("Status overrides saved for "+attDate+".");
         renderAll();
       };
+      wireLiveRowFilter("attSearchInput");
     }
   }
 
@@ -3036,6 +3195,43 @@ function attachHandlers(){
       }
       toast("Leave rejected."); renderAll();
     });
+
+    const leaveSearchInput = document.getElementById("leaveSearchInput");
+    if(leaveSearchInput) leaveSearchInput.oninput = (e)=>{
+      leaveSearch = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      paginationState["leaves"] = 1;
+      renderAll();
+      const newInput = document.getElementById("leaveSearchInput");
+      if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+    };
+    const leaveStatusFilterEl = document.getElementById("leaveStatusFilter");
+    if(leaveStatusFilterEl) leaveStatusFilterEl.onchange = (e)=>{
+      leaveStatusFilter = e.target.value;
+      paginationState["leaves"] = 1;
+      renderAll();
+    };
+    document.querySelectorAll(".leaveCheck").forEach(cb=>cb.onchange=()=>{
+      if(cb.checked) selectedLeaveIds.add(cb.dataset.id); else selectedLeaveIds.delete(cb.dataset.id);
+      renderAll();
+    });
+    const leaveCheckAll = document.getElementById("leaveCheckAll");
+    if(leaveCheckAll) leaveCheckAll.onchange = (e)=>{
+      const pageIds = Array.from(document.querySelectorAll(".leaveCheck")).map(cb=>cb.dataset.id);
+      pageIds.forEach(id=> e.target.checked ? selectedLeaveIds.add(id) : selectedLeaveIds.delete(id));
+      renderAll();
+    };
+    const bulkDelLeaveBtn = document.getElementById("bulkDeleteLeaveBtn");
+    if(bulkDelLeaveBtn) bulkDelLeaveBtn.onclick = async ()=>{
+      if(!confirm(`Delete ${selectedLeaveIds.size} leave request(s)?`)) return;
+      const ids = Array.from(selectedLeaveIds);
+      DB.leaves = DB.leaves.filter(x=>!selectedLeaveIds.has(x.id));
+      await save("leaves");
+      await logAudit("bulk_delete", "leaves", null, {ids});
+      selectedLeaveIds.clear();
+      toast(`${ids.length} leave request(s) deleted.`);
+      renderAll();
+    };
   }
 
   if(activeTab==="CRM"){
@@ -3085,6 +3281,40 @@ function attachHandlers(){
       const lead = DB.leads.find(l=>l.id===inp.dataset.id); if(lead) lead.nextFollowUp = inp.value;
       await save("leads");
     });
+
+    document.getElementById("leadSearchInput").oninput = (e)=>{
+      leadSearch = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      paginationState["leads"] = 1;
+      renderAll();
+      const newInput = document.getElementById("leadSearchInput");
+      if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+    };
+    document.getElementById("leadStageFilter").onchange = (e)=>{
+      leadStageFilter = e.target.value;
+      paginationState["leads"] = 1;
+      renderAll();
+    };
+    document.querySelectorAll(".leadCheck").forEach(cb=>cb.onchange=()=>{
+      if(cb.checked) selectedLeadIds.add(cb.dataset.id); else selectedLeadIds.delete(cb.dataset.id);
+      renderAll();
+    });
+    const leadCheckAll = document.getElementById("leadCheckAll");
+    if(leadCheckAll) leadCheckAll.onchange = (e)=>{
+      const pageIds = Array.from(document.querySelectorAll(".leadCheck")).map(cb=>cb.dataset.id);
+      pageIds.forEach(id=> e.target.checked ? selectedLeadIds.add(id) : selectedLeadIds.delete(id));
+      renderAll();
+    };
+    const bulkDelLeadBtn = document.getElementById("bulkDeleteLeadBtn");
+    if(bulkDelLeadBtn) bulkDelLeadBtn.onclick = async ()=>{
+      if(!confirm(`Delete ${selectedLeadIds.size} lead(s)?`)) return;
+      const ids = Array.from(selectedLeadIds);
+      DB.leads = DB.leads.filter(x=>!selectedLeadIds.has(x.id));
+      await save("leads");
+      selectedLeadIds.clear();
+      toast(`${ids.length} lead(s) deleted.`);
+      renderAll();
+    };
   }
   if(activeTab==="Reports"){
     document.getElementById("loadReportBtn").onclick = ()=>{
@@ -3224,6 +3454,44 @@ function attachHandlers(){
       toast("User removed.");
       renderAll();
     });
+
+    const teamSearchInput = document.getElementById("teamSearchInput");
+    if(teamSearchInput) teamSearchInput.oninput = (e)=>{
+      teamSearch = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      paginationState["team"] = 1;
+      renderAll();
+      const newInput = document.getElementById("teamSearchInput");
+      if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+    };
+    const teamRoleFilterEl = document.getElementById("teamRoleFilter");
+    if(teamRoleFilterEl) teamRoleFilterEl.onchange = (e)=>{
+      teamRoleFilter = e.target.value;
+      paginationState["team"] = 1;
+      renderAll();
+    };
+    document.querySelectorAll(".teamCheck").forEach(cb=>cb.onchange=()=>{
+      if(cb.checked) selectedTeamIds.add(cb.dataset.id); else selectedTeamIds.delete(cb.dataset.id);
+      renderAll();
+    });
+    const teamCheckAll = document.getElementById("teamCheckAll");
+    if(teamCheckAll) teamCheckAll.onchange = (e)=>{
+      const pageIds = Array.from(document.querySelectorAll(".teamCheck")).map(cb=>cb.dataset.id);
+      pageIds.forEach(id=> e.target.checked ? selectedTeamIds.add(id) : selectedTeamIds.delete(id));
+      renderAll();
+    };
+    const bulkDelTeamBtn = document.getElementById("bulkDeleteTeamBtn");
+    if(bulkDelTeamBtn) bulkDelTeamBtn.onclick = async ()=>{
+      if(!confirm(`Delete ${selectedTeamIds.size} team member(s)? This revokes their access immediately.`)) return;
+      const ids = Array.from(selectedTeamIds);
+      const { error } = await sb.from("profiles").delete().in("id", ids);
+      if(error){ toast("Could not delete: " + error.message, true); return; }
+      await logAudit("bulk_delete", "profiles", null, {ids});
+      selectedTeamIds.clear();
+      await loadTeam();
+      toast(`${ids.length} team member(s) removed.`);
+      renderAll();
+    };
   }
 }
 
