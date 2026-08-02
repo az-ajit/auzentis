@@ -158,6 +158,18 @@
   </div>
 </div>
 
+<div id="blockedScreen" style="display:none;max-width:420px;margin:60px auto;padding:0 16px;">
+  <div class="card" style="text-align:center;">
+    <img id="blockedMark" style="height:40px;" alt="Auzentis">
+    <h2 style="margin-top:16px;color:var(--danger);">Access Restricted</h2>
+    <p id="blockedMessage" style="font-size:14px;color:var(--ink);margin:14px 0;"></p>
+    <div class="row" style="justify-content:center;">
+      <button class="btn gold" id="blockedRetryBtn">Try Again</button>
+      <button class="btn ghost" id="blockedLogoutBtn">Log Out</button>
+    </div>
+  </div>
+</div>
+
 <div id="appRoot" style="display:none;">
 <header class="topbar">
   <div class="brand">
@@ -1839,10 +1851,11 @@ function renderMyAttendance(){
       <button class="btn gold" id="punchOutBtn">Punch Out</button>`;
   } else {
     actionHtml = `
-      <p>Punched in at <b>${new Date(todayRec.punchIn).toLocaleTimeString()}</b>,
-      punched out at <b>${new Date(todayRec.punchOut).toLocaleTimeString()}</b>.
-      Total: <b>${hoursBetween(todayRec.punchIn, todayRec.punchOut)}</b>.</p>
-      <p class="helptext">Done for today. Contact your Admin if this needs correcting.</p>`;
+      <p>Last session: in at <b>${new Date(todayRec.punchIn).toLocaleTimeString()}</b>,
+      out at <b>${new Date(todayRec.punchOut).toLocaleTimeString()}</b>
+      (<b>${hoursBetween(todayRec.punchIn, todayRec.punchOut)}</b>).</p>
+      <p class="helptext">You can punch in again if you're back at the office (e.g. after lunch or a meeting).</p>
+      <button class="btn gold" id="punchInBtn">Punch In</button>`;
   }
 
   const deviceRows = myDevices.map(d=>`
@@ -1908,6 +1921,56 @@ function getCurrentPosition(){
       { enableHighAccuracy: true, timeout: 15000 }
     );
   });
+}
+
+function haversineMetersClient(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function showBlockedScreen(msg){
+  const overlay = document.getElementById("loadingOverlay");
+  if(overlay) overlay.remove();
+  document.getElementById("authScreen").style.display = "none";
+  document.getElementById("appRoot").style.display = "none";
+  document.getElementById("blockedMark").src = LOGO_MARK;
+  document.getElementById("blockedMessage").textContent = msg;
+  document.getElementById("blockedScreen").style.display = "block";
+}
+
+// Everyone except Admin/Director must be physically at the office to use the
+// app at all — not just to punch in. The login screen itself can't be hidden
+// (this is a static site with no server to gate delivery), but nothing past
+// login is reachable from outside the configured office radius.
+async function checkOfficeLocationGate(){
+  if(currentProfile.role === "Admin" || currentProfile.role === "Director") return true;
+
+  const { data: srow } = await sb.from("settings").select("data").eq("id", 1).maybeSingle();
+  const s = (srow && srow.data) || {};
+  if(typeof s.officeLat !== "number" || typeof s.officeLng !== "number"){
+    showBlockedScreen("Office location isn't set up yet. Ask your Admin to configure it in Settings.");
+    return false;
+  }
+
+  let coords;
+  try{
+    coords = await getCurrentPosition();
+  }catch(e){
+    showBlockedScreen("Location access is required to use this application. Please allow location permission in your browser, then try again.");
+    return false;
+  }
+
+  const radius = typeof s.officeRadiusM === "number" ? s.officeRadiusM : 150;
+  const distance = haversineMetersClient(coords.latitude, coords.longitude, s.officeLat, s.officeLng);
+  if(distance > radius){
+    logAudit("access_blocked_offsite", "profiles", currentProfile.emp_id, {distanceMeters: Math.round(distance), radiusMeters: radius}).catch(()=>{});
+    showBlockedScreen("This is a private/proprietary product and cannot be accessed outside Auzentis office premises.");
+    return false;
+  }
+  return true;
 }
 
 async function enrollFingerprint(){
@@ -3597,6 +3660,11 @@ async function startApp(){
   document.getElementById("headerWordmark").src = LOGO_WORDMARK;
   currentRole = currentProfile.role;
   currentEmpId = currentProfile.emp_id || null;
+
+  const allowed = await checkOfficeLocationGate();
+  if(!allowed) return;
+
+  document.getElementById("blockedScreen").style.display = "none";
   document.getElementById("authScreen").style.display = "none";
   document.getElementById("appRoot").style.display = "block";
   await loadDB();
@@ -3628,6 +3696,14 @@ async function startApp(){
     const current = document.getElementById("authSubmitBtn").dataset.mode;
     setAuthMode(current === "signup" ? "login" : "signup");
   };
+
+  document.getElementById("blockedRetryBtn").onclick = async () => {
+    const btn = document.getElementById("blockedRetryBtn");
+    btn.disabled = true; btn.textContent = "Checking…";
+    try{ await startApp(); }
+    finally{ btn.disabled = false; btn.textContent = "Try Again"; }
+  };
+  document.getElementById("blockedLogoutBtn").onclick = signOutUser;
 
   document.getElementById("authForgotLink").onclick = async (e) => {
     e.preventDefault();
