@@ -386,6 +386,14 @@ class NotApprovedError extends Error {
 }
 
 // ============================= STORAGE (Supabase) =============================
+async function reloadTable(key){
+  const cfg = TABLE_CONFIG[key];
+  if(!cfg) return;
+  const { data, error } = await sb.from(cfg.table).select("*");
+  if(error){ toast("Could not refresh " + key + ": " + error.message, true); return; }
+  DB[key] = (data || []).map(cfg.fromRow);
+}
+
 async function loadAttendanceSessions(){
   const { data: sessionRows, error: sessErr } = await sb.from("attendance_sessions").select("*");
   if(sessErr){
@@ -2968,8 +2976,14 @@ function attachHandlers(){
   }
 
   if(activeTab==="Payroll"){
-    document.getElementById("loadPeriodBtn").onclick = ()=>{
+    document.getElementById("loadPeriodBtn").onclick = async ()=>{
+      const btn = document.getElementById("loadPeriodBtn");
+      btn.disabled = true; btn.textContent = "Loading…";
       payrollPeriod = {month:parseInt(val("payMonth")), year:parseInt(val("payYear"))};
+      await reloadTable("payroll");
+      await loadAttendanceSessions();
+      await reloadTable("leaves");
+      btn.disabled = false; btn.textContent = "Load";
       renderAll();
     };
     document.getElementById("savePayrollBtn").onclick = async ()=>{
@@ -2991,8 +3005,13 @@ function attachHandlers(){
   }
 
   if(activeTab==="Payments"){
-    document.getElementById("loadPayTrBtn").onclick = ()=>{
+    document.getElementById("loadPayTrBtn").onclick = async ()=>{
+      const btn = document.getElementById("loadPayTrBtn");
+      btn.disabled = true; btn.textContent = "Loading…";
       paymentsPeriod = {month:parseInt(val("payTrMonth")), year:parseInt(val("payTrYear"))};
+      await reloadTable("payments");
+      await reloadTable("payroll");
+      btn.disabled = false; btn.textContent = "Load";
       renderAll();
     };
     document.getElementById("savePaymentsBtn").onclick = async ()=>{
