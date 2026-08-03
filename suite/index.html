@@ -386,6 +386,17 @@ class NotApprovedError extends Error {
 }
 
 // ============================= STORAGE (Supabase) =============================
+async function loadAttendanceSessions(){
+  const { data: sessionRows, error: sessErr } = await sb.from("attendance_sessions").select("*");
+  if(sessErr){
+    console.error("Could not load attendance_sessions:", sessErr);
+    toast("Could not load punch sessions: " + sessErr.message + " — you may need to run the attendance_sessions migration SQL.", true);
+    DB.attendanceSessions = [];
+  } else {
+    DB.attendanceSessions = (sessionRows || []).map(r=>({id:r.id, empId:r.emp_id, date:r.date, punchIn:r.punch_in, punchOut:r.punch_out}));
+  }
+}
+
 async function loadDB(){
   try{
     const { data: srow } = await sb.from("settings").select("*").eq("id", 1).maybeSingle();
@@ -403,14 +414,7 @@ async function loadDB(){
       DB[key] = (data || []).map(cfg.fromRow);
     }
 
-    const { data: sessionRows, error: sessErr } = await sb.from("attendance_sessions").select("*");
-    if(sessErr){
-      console.error("Could not load attendance_sessions:", sessErr);
-      toast("Could not load punch sessions: " + sessErr.message + " — you may need to run the attendance_sessions migration SQL.", true);
-      DB.attendanceSessions = [];
-    } else {
-      DB.attendanceSessions = (sessionRows || []).map(r=>({id:r.id, empId:r.emp_id, date:r.date, punchIn:r.punch_in, punchOut:r.punch_out}));
-    }
+    await loadAttendanceSessions();
 
     if(DB.employees.length === 0){
       DB.employees = SEED_EMPLOYEES.slice();
@@ -3286,7 +3290,17 @@ function attachHandlers(){
         removeDevice(e.target.closest("tr").dataset.cred);
       });
     } else {
-      document.getElementById("loadAttBtn").onclick = ()=>{ attDate = val("attDateInput"); renderAll(); };
+      document.getElementById("loadAttBtn").onclick = async ()=>{
+        const btn = document.getElementById("loadAttBtn");
+        btn.disabled = true; btn.textContent = "Loading…";
+        attDate = val("attDateInput");
+        await loadAttendanceSessions();
+        const { data: attRows, error: attErr } = await sb.from("attendance").select("*");
+        if(attErr){ toast("Could not refresh status overrides: " + attErr.message, true); }
+        else { DB.attendance = attRows.map(TABLE_CONFIG.attendance.fromRow); }
+        btn.disabled = false; btn.textContent = "Load";
+        renderAll();
+      };
       document.getElementById("saveAttBtn").onclick = async ()=>{
         document.querySelectorAll(".attStatus").forEach(sel=>{
           const empId = sel.dataset.emp;
