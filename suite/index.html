@@ -516,6 +516,61 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
+// ============================= MINI CHARTS (inline SVG, no external library) =============================
+const CHART_COLORS = ["#1B2454","#C08A2E","#1E8E5A","#B4530F","#8FA0D0","#B33636"];
+function svgBarChart(items, opts){
+  opts = opts || {};
+  const width = opts.width || 480;
+  const barHeight = opts.barHeight || 20;
+  const gap = opts.gap || 10;
+  const labelWidth = opts.labelWidth || 100;
+  const chartWidth = Math.max(40, width - labelWidth - 70);
+  const maxVal = Math.max(1, ...items.map(i=>i.value||0));
+  const rowH = barHeight + gap;
+  const height = items.length * rowH;
+  const bars = items.map((it,i)=>{
+    const y = i*rowH;
+    const w = Math.max(2, (it.value||0)/maxVal*chartWidth);
+    const color = it.color || CHART_COLORS[i % CHART_COLORS.length];
+    const valLabel = it.valueLabel != null ? it.valueLabel : it.value;
+    return `
+      <text x="0" y="${y+barHeight*0.72}" font-size="12" style="fill:var(--ink);">${escapeHtml(it.label)}</text>
+      <rect x="${labelWidth}" y="${y}" width="${w}" height="${barHeight}" rx="4" style="fill:${color};"></rect>
+      <text x="${labelWidth + w + 8}" y="${y+barHeight*0.72}" font-size="12" style="fill:var(--muted);">${escapeHtml(String(valLabel))}</text>
+    `;
+  }).join("");
+  if(!items.length) return `<div class="empty">No data yet.</div>`;
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="max-width:${width}px;font-family:inherit;">${bars}</svg>`;
+}
+
+function renderUpcomingHolidaysCard(){
+  const todayStr = new Date().toISOString().slice(0,10);
+  const upcoming = DB.holidays.filter(h=>h.date>=todayStr).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,8);
+  return `
+  <div class="card">
+    <h2>Upcoming Holidays</h2>
+    ${upcoming.length ? `
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Date</th><th>Holiday</th></tr></thead>
+        <tbody>${upcoming.map(h=>`<tr><td>${h.date}</td><td>${escapeHtml(h.name)}</td></tr>`).join("")}</tbody>
+      </table>
+    </div>` : `<div class="empty">No upcoming holidays added yet — add them in Settings → Company Holidays.</div>`}
+  </div>`;
+}
+
+function todayAttendanceBreakdown(){
+  const todayStr = new Date().toISOString().slice(0,10);
+  const counts = {};
+  DB.employees.forEach(e=>{
+    const st = statusForDay(e.id, todayStr);
+    counts[st] = (counts[st]||0) + 1;
+  });
+  const order = ["Present","Half Day","Absent","On Leave","Weekly Off","Holiday"];
+  const colors = {Present:"#1E8E5A", "Half Day":"#C08A2E", Absent:"#B33636", "On Leave":"#8FA0D0", "Weekly Off":"#6B7686", Holiday:"#1B2454"};
+  return order.filter(k=>counts[k]).map(k=>({label:k, value:counts[k], color:colors[k]}));
+}
+
 // ============================= AUDIT LOG =============================
 async function logAudit(action, tableName, recordId, detail){
   try{
@@ -700,11 +755,130 @@ function renderDashboard(){
   const netTotal = rows.reduce((a,r)=>a+r.netPay,0);
   const costTotal = rows.reduce((a,r)=>a+r.employerCost,0);
   const activeCount = DB.employees.filter(e=>e.status==="Active").length;
+  const inactiveCount = DB.employees.filter(e=>e.status!=="Active").length;
 
   const now = new Date();
   const pnl = computePnL(now.getMonth()+1, now.getFullYear());
   const pendingLeaves = DB.leaves.filter(l=>l.status==="Pending").length;
   const openLeadsValue = DB.leads.filter(l=>!["Won","Lost"].includes(l.stage)).reduce((a,l)=>a+(l.value||0),0);
+
+  const trendPeriods = periods.slice(-6);
+  const payrollTrend = trendPeriods.map(p=>{
+    const r = DB.payroll.filter(x=>x.month===p.month&&x.year===p.year).map(computePayroll).filter(Boolean);
+    const gross = r.reduce((a,x)=>a+x.gross,0);
+    return {label: monthName(p.month).slice(0,3)+" "+p.year, value: gross, valueLabel: "₹"+fmt0(gross)};
+  });
+
+  const stages = ["New","Contacted","Qualified","Proposal","Won","Lost"];
+  const pipelineChart = stages.map(s=>({label:s, value: DB.leads.filter(l=>l.stage===s).length}));
+
+  const attendanceChart = todayAttendanceBreakdown();
+
+  const welcomeCard = `
+  <div class="card">
+    <h2>Welcome to Auzentis Business Suite</h2>
+    <div class="sub">Payroll, statutory ledger, accounting, attendance, leave management and a lightweight CRM — all in one place.</div>
+    <p class="helptext" style="margin-top:10px;">Note: the role switcher above reorganizes what each person sees in this app — it is not a secure login system (Admin/Director/HR/Accounts/Sales views all still see full company data by design). A real Employee login is properly restricted at both the UI and their own scope — see the Team tab.</p>
+  </div>`;
+
+  if(currentRole === "Admin" || currentRole === "Director"){
+    const lopRisk = DB.employees.map(e=>({emp:e, shortfall: computeMonthlyShortfall(e.id, now.getMonth()+1, now.getFullYear())}))
+      .filter(x=>x.shortfall >= ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS)
+      .sort((a,b)=>b.shortfall-a.shortfall);
+
+    return `
+    <div class="grid grid-4">
+      <div class="stat"><div class="lbl">Active Employees</div><div class="val">${activeCount}</div></div>
+      <div class="stat"><div class="lbl">${latest?monthName(latest.month)+" "+latest.year+" Gross":"No payroll yet"}</div><div class="val">₹${fmt0(grossTotal)}</div></div>
+      <div class="stat"><div class="lbl">${latest?"Net Payable":"—"}</div><div class="val">₹${fmt0(netTotal)}</div></div>
+      <div class="stat"><div class="lbl">${latest?"Employer Cost":"—"}</div><div class="val">₹${fmt0(costTotal)}</div></div>
+    </div>
+    <div class="grid grid-4">
+      <div class="stat"><div class="lbl">Net Profit — ${monthName(now.getMonth()+1)}</div><div class="val" style="color:${pnl.netProfit>=0?'var(--ok)':'var(--danger)'}">₹${fmt0(pnl.netProfit)}</div></div>
+      <div class="stat"><div class="lbl">Pending Leave Requests</div><div class="val">${pendingLeaves}</div></div>
+      <div class="stat"><div class="lbl">Open Pipeline Value</div><div class="val">₹${fmt0(openLeadsValue)}</div></div>
+      <div class="stat"><div class="lbl">Total Leads</div><div class="val">${DB.leads.length}</div></div>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>Today's Attendance</h2>
+        ${svgBarChart(attendanceChart)}
+      </div>
+      <div class="card">
+        <h2>Gross Payroll — Last ${payrollTrend.length} Period(s)</h2>
+        ${svgBarChart(payrollTrend)}
+      </div>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h2>CRM Pipeline by Stage</h2>
+        ${svgBarChart(pipelineChart)}
+      </div>
+      <div class="card">
+        <h2>Attendance Shortfall Risk (LOP) — ${monthName(now.getMonth()+1)}</h2>
+        <div class="sub">Employees short ${ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS}h+ this month, based on hours worked so far.</div>
+        ${lopRisk.length ? `
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>ID</th><th>Name</th><th class="num">Shortfall</th></tr></thead>
+            <tbody>${lopRisk.map(x=>`<tr><td>${x.emp.id}</td><td>${x.emp.name}</td><td class="num">${formatHours(x.shortfall)}</td></tr>`).join("")}</tbody>
+          </table>
+        </div>` : `<div class="empty">No one is over the shortfall threshold right now.</div>`}
+      </div>
+    </div>
+    ${renderUpcomingHolidaysCard()}
+    ${welcomeCard}`;
+  }
+
+  if(currentRole === "HR"){
+    return `
+    <div class="grid grid-4">
+      <div class="stat"><div class="lbl">Active Employees</div><div class="val">${activeCount}</div></div>
+      <div class="stat"><div class="lbl">Inactive Employees</div><div class="val">${inactiveCount}</div></div>
+      <div class="stat"><div class="lbl">Pending Leave Requests</div><div class="val">${pendingLeaves}</div></div>
+      <div class="stat"><div class="lbl">${latest?monthName(latest.month)+" "+latest.year+" Gross":"No payroll yet"}</div><div class="val">₹${fmt0(grossTotal)}</div></div>
+    </div>
+    <div class="card">
+      <h2>Today's Attendance</h2>
+      ${svgBarChart(attendanceChart)}
+    </div>
+    ${renderUpcomingHolidaysCard()}
+    ${welcomeCard}`;
+  }
+
+  if(currentRole === "Accounts"){
+    return `
+    <div class="grid grid-4">
+      <div class="stat"><div class="lbl">${latest?monthName(latest.month)+" "+latest.year+" Gross":"No payroll yet"}</div><div class="val">₹${fmt0(grossTotal)}</div></div>
+      <div class="stat"><div class="lbl">${latest?"Net Payable":"—"}</div><div class="val">₹${fmt0(netTotal)}</div></div>
+      <div class="stat"><div class="lbl">${latest?"Employer Cost":"—"}</div><div class="val">₹${fmt0(costTotal)}</div></div>
+      <div class="stat"><div class="lbl">Net Profit — ${monthName(now.getMonth()+1)}</div><div class="val" style="color:${pnl.netProfit>=0?'var(--ok)':'var(--danger)'}">₹${fmt0(pnl.netProfit)}</div></div>
+    </div>
+    <div class="card">
+      <h2>Gross Payroll — Last ${payrollTrend.length} Period(s)</h2>
+      ${svgBarChart(payrollTrend)}
+    </div>
+    ${renderUpcomingHolidaysCard()}
+    ${welcomeCard}`;
+  }
+
+  if(currentRole === "Sales"){
+    const soon = new Date(); soon.setDate(soon.getDate()+7);
+    const upcomingFollowUps = DB.leads.filter(l=>l.nextFollowUp && new Date(l.nextFollowUp)<=soon && !["Won","Lost"].includes(l.stage)).length;
+    return `
+    <div class="grid grid-4">
+      <div class="stat"><div class="lbl">Open Pipeline Value</div><div class="val">₹${fmt0(openLeadsValue)}</div></div>
+      <div class="stat"><div class="lbl">Total Leads</div><div class="val">${DB.leads.length}</div></div>
+      <div class="stat"><div class="lbl">Won</div><div class="val">${DB.leads.filter(l=>l.stage==="Won").length}</div></div>
+      <div class="stat"><div class="lbl">Follow-ups Due (7 days)</div><div class="val">${upcomingFollowUps}</div></div>
+    </div>
+    <div class="card">
+      <h2>CRM Pipeline by Stage</h2>
+      ${svgBarChart(pipelineChart)}
+    </div>
+    ${renderUpcomingHolidaysCard()}
+    ${welcomeCard}`;
+  }
 
   return `
   <div class="grid grid-4">
@@ -713,22 +887,8 @@ function renderDashboard(){
     <div class="stat"><div class="lbl">${latest?"Net Payable":"—"}</div><div class="val">₹${fmt0(netTotal)}</div></div>
     <div class="stat"><div class="lbl">${latest?"Employer Cost":"—"}</div><div class="val">₹${fmt0(costTotal)}</div></div>
   </div>
-  <div class="grid grid-4">
-    <div class="stat"><div class="lbl">Net Profit — ${monthName(now.getMonth()+1)}</div><div class="val" style="color:${pnl.netProfit>=0?'var(--ok)':'var(--danger)'}">₹${fmt0(pnl.netProfit)}</div></div>
-    <div class="stat"><div class="lbl">Pending Leave Requests</div><div class="val">${pendingLeaves}</div></div>
-    <div class="stat"><div class="lbl">Open Pipeline Value</div><div class="val">₹${fmt0(openLeadsValue)}</div></div>
-    <div class="stat"><div class="lbl">Total Leads</div><div class="val">${DB.leads.length}</div></div>
-  </div>
-  <div class="card">
-    <h2>Welcome to Auzentis Business Suite</h2>
-    <div class="sub">Payroll, statutory ledger, accounting, attendance, leave management and a lightweight CRM — all in one place.</div>
-    <div class="grid grid-3">
-      <div><b>Payroll</b><p class="helptext">Settings → Employees → Payroll → Payments → Ledger → Payslip.</p></div>
-      <div><b>Accounting</b><p class="helptext">Invoices, expenses and a live profit &amp; loss summary.</p></div>
-      <div><b>HR &amp; CRM</b><p class="helptext">Attendance, leave requests and a simple sales pipeline.</p></div>
-    </div>
-    <p class="helptext" style="margin-top:10px;">Note: the role switcher above reorganizes what each person sees in this app — it is not a secure login system for Admin/HR/Accounts/Sales views (they all still see full company data by design). A real Employee login is properly restricted at both the UI and their own scope — see the Team tab.</p>
-  </div>`;
+  ${renderUpcomingHolidaysCard()}
+  ${welcomeCard}`;
 }
 
 function renderMyDashboard(){
@@ -737,11 +897,30 @@ function renderMyDashboard(){
   const todaySessions = sessionsForDay(currentEmpId, today);
   const openSession = todaySessions.find(s=>!s.punchOut);
   const status = openSession ? "Punched In" : (todaySessions.length ? `Punched Out (${formatHours(hoursForDay(currentEmpId, today))} today)` : "Not marked");
+
+  const now = new Date();
+  const shortfall = currentEmpId ? computeMonthlyShortfall(currentEmpId, now.getMonth()+1, now.getFullYear()) : 0;
+  const balance = currentEmpId ? leaveBalance(currentEmpId, now.getFullYear()) : null;
+
   return `
   <div class="grid grid-2">
     <div class="stat"><div class="lbl">Today's Attendance</div><div class="val">${status}</div></div>
     <div class="stat"><div class="lbl">Welcome</div><div class="val">${emp ? emp.name : "—"}</div></div>
   </div>
+  ${balance ? `
+  <div class="grid grid-3">
+    <div class="stat"><div class="lbl">Casual Leave Balance</div><div class="val">${balance.Casual.balance} / ${balance.Casual.quota}</div></div>
+    <div class="stat"><div class="lbl">Sick Leave Balance</div><div class="val">${balance.Sick.balance} / ${balance.Sick.quota}</div></div>
+    <div class="stat"><div class="lbl">Earned Leave Balance</div><div class="val">${balance.Earned.balance} / ${balance.Earned.quota}</div></div>
+  </div>` : ''}
+  ${shortfall >= 0.05 ? `
+  <div class="card">
+    <h2>This Month's Hours</h2>
+    <p class="helptext" style="color:${shortfall>=ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS?'var(--danger)':'var(--warn)'};font-size:13px;">
+      You're short by <b>${formatHours(shortfall)}</b> this month${shortfall>=ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS?' — this may result in a Loss-of-Pay deduction unless made up before month end.':'. Try to make it up in the remaining working days.'}
+    </p>
+  </div>` : ''}
+  ${renderUpcomingHolidaysCard()}
   <div class="card">
     <h2>Welcome to Auzentis</h2>
     <div class="sub">Use the Attendance tab to punch in when you start work and punch out when you finish.</div>
@@ -1746,7 +1925,7 @@ function renderPayslip(){
         ${STAMP_IMG ? `<img src="${STAMP_IMG}" style="height:80px;width:auto;" alt="Company Stamp">` : ''}
         ${SIGNATURE_IMG ? `<div style="text-align:center;">
           <img src="${SIGNATURE_IMG}" style="height:50px;width:auto;display:block;" alt="Signature">
-          <div style="font-size:11px;color:var(--muted);border-top:1px solid var(--line);margin-top:2px;padding-top:2px;">${SIGNATORY_NAME}<br>Director, Auzentis Private Limited</div>
+          <div style="font-size:11px;color:var(--muted);border-top:1px solid var(--line);margin-top:2px;padding-top:2px;">${SIGNATORY_NAME}<br>Director</div>
         </div>` : ''}
       </div>` : ''}
     </div>
