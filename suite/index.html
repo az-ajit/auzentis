@@ -982,6 +982,7 @@ let paymentsPeriod = null;
 function renderPayments(){
   const periods = distinctPeriods();
   if(!paymentsPeriod){ paymentsPeriod = periods.length ? periods[periods.length-1] : {month:new Date().getMonth()+1, year:new Date().getFullYear()}; }
+  const todayStr = new Date().toISOString().slice(0,10);
   const entries = DB.payroll.filter(p=>p.month===paymentsPeriod.month&&p.year===paymentsPeriod.year);
   const rows = entries.map(pe=>{
     const calc = computePayroll(pe);
@@ -1002,8 +1003,11 @@ function renderPayments(){
       <td class="num">${fmt(calc.netPay)}</td>
       <td class="num"><input type="number" class="badge-input advGivenInput" value="${pay.advanceGiven||0}" data-emp="${pe.empId}"></td>
       <td class="num"><input type="number" class="badge-input advRecInput" value="${pay.advanceRecovered||0}" data-emp="${pe.empId}"></td>
-      <td class="num"><input type="number" class="badge-input paidInput" value="${pay.amountPaid||0}" data-emp="${pe.empId}"></td>
-      <td><input type="date" class="dateInput" value="${pay.paymentDate||''}" data-emp="${pe.empId}"></td>
+      <td class="num">
+        <input type="number" class="badge-input paidInput" value="${pay.amountPaid||0}" data-emp="${pe.empId}">
+        <button type="button" class="btn ghost sm payFullBtn" data-emp="${pe.empId}" data-balance="${salBal.toFixed(2)}" title="Fill with the current Salary Balance">Pay Full</button>
+      </td>
+      <td><input type="date" class="dateInput" value="${pay.paymentDate||todayStr}" data-emp="${pe.empId}"></td>
       <td><select class="modeInput" data-emp="${pe.empId}">
         ${["Bank Transfer","Cash","Cheque","UPI"].map(m=>`<option ${m===pay.mode?'selected':''}>${m}</option>`).join("")}
       </select></td>
@@ -1643,7 +1647,9 @@ function renderPayslip(){
       <button class="btn ghost" id="loadPayslipBtn">Load</button>
       <button class="btn gold" id="downloadPdfBtn">Download PDF</button>
       <button class="btn gold" id="emailPayslipBtn">Email Payslip</button>
+      ${scoped ? '' : `<button class="btn gold" id="emailAllPayslipsBtn">Email All Payslips (this period)</button>`}
     </div>
+    ${scoped ? '' : `<p class="helptext" id="bulkEmailProgress"></p>`}
   </div>`;
 
   if(!calc){
@@ -1840,9 +1846,11 @@ function deriveAutoStatus(hours, hasSessions){
 
 // Manual override (anything other than the default "Present") always wins;
 // otherwise status is auto-derived from actual hours worked that day.
+// Sundays are treated as a weekly off, not Absent, unless overridden.
 function statusForDay(empId, dateStr){
   const override = DB.attendance.find(a=>a.date===dateStr && a.empId===empId);
   if(override && override.status && override.status !== "Present") return override.status;
+  if(new Date(dateStr+"T00:00:00").getDay() === 0) return "Weekly Off";
   const sessions = sessionsForDay(empId, dateStr);
   return deriveAutoStatus(hoursForDay(empId, dateStr), sessions.length>0);
 }
@@ -1899,7 +1907,7 @@ function renderAttendance(){
     </tr>`;
   }).join("");
 
-  const summary = ["Present","Half Day","Absent","On Leave"].map(s=>{
+  const summary = ["Present","Half Day","Absent","On Leave","Weekly Off"].map(s=>{
     const count = DB.employees.filter(e=>statusForDay(e.id, attDate)===s).length;
     return `<div class="stat"><div class="lbl">${s}</div><div class="val">${count}</div></div>`;
   }).join("");
@@ -3030,6 +3038,12 @@ function attachHandlers(){
       toast("Payments saved for "+monthName(paymentsPeriod.month)+" "+paymentsPeriod.year+".");
       renderAll();
     };
+    document.querySelectorAll(".payFullBtn").forEach(b=>b.onclick=()=>{
+      const id = b.dataset.emp;
+      const balance = parseFloat(b.dataset.balance)||0;
+      const input = document.querySelector(`.paidInput[data-emp="${id}"]`);
+      if(input) input.value = Math.round(((parseFloat(input.value)||0) + balance)*100)/100;
+    });
     wireLiveRowFilter("paymentsSearchInput");
   }
 
@@ -3081,6 +3095,8 @@ function attachHandlers(){
     if(dlBtn) dlBtn.onclick = downloadPayslipPdf;
     const emailBtn = document.getElementById("emailPayslipBtn");
     if(emailBtn) emailBtn.onclick = emailPayslip;
+    const emailAllBtn = document.getElementById("emailAllPayslipsBtn");
+    if(emailAllBtn) emailAllBtn.onclick = emailAllPayslips;
   }
 
   if(activeTab==="Accounting"){
@@ -3750,6 +3766,47 @@ async function downloadPayslipPdf(){
   }finally{
     btn.textContent = "Download PDF"; btn.disabled = false;
   }
+}
+
+let bulkEmailInProgress = false;
+async function emailAllPayslips(){
+  if(bulkEmailInProgress){ toast("Already sending payslips, please wait.", true); return; }
+  const targets = DB.employees.filter(e=>DB.payroll.some(p=>p.empId===e.id && p.month===payslipState.month && p.year===payslipState.year));
+  if(!targets.length){ toast("No payroll records found for this period.", true); return; }
+  if(!confirm(`Email payslips to ${targets.length} employee(s) for ${monthName(payslipState.month)} ${payslipState.year}?`)) return;
+
+  bulkEmailInProgress = true;
+  const originalEmpId = payslipState.empId;
+  let sent = 0, skipped = 0;
+  const skippedNames = [];
+
+  for(let i=0;i<targets.length;i++){
+    const emp = targets[i];
+    payslipState.empId = emp.id;
+    renderAll();
+    const progressEl = document.getElementById("bulkEmailProgress");
+    if(progressEl) progressEl.textContent = `Sending ${i+1} of ${targets.length}: ${emp.name}…`;
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+
+    if(!emp.email){ skipped++; skippedNames.push(emp.name+" (no email on file)"); continue; }
+    try{
+      const { pdf, filename } = await buildPayslipPdf();
+      const base64 = pdf.output("datauristring").split(",")[1];
+      const { data, error } = await sb.functions.invoke("send-payslip-email", {
+        body: { emp_id: emp.id, month: payslipState.month, year: payslipState.year, filename, pdf_base64: base64 }
+      });
+      if(error){ skipped++; skippedNames.push(emp.name+": "+(await extractFnError(error))); continue; }
+      if(data && data.error){ skipped++; skippedNames.push(emp.name+": "+data.error); continue; }
+      sent++;
+    }catch(err){
+      skipped++; skippedNames.push(emp.name+": "+err.message);
+    }
+  }
+
+  payslipState.empId = originalEmpId;
+  bulkEmailInProgress = false;
+  renderAll();
+  toast(`Emailed ${sent} payslip(s)` + (skipped ? `, skipped ${skipped}: ${skippedNames.join("; ")}` : "") + ".", skipped>0);
 }
 
 async function emailPayslip(){
