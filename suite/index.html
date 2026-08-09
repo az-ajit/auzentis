@@ -562,7 +562,7 @@ function renderUpcomingHolidaysCard(){
 function todayAttendanceBreakdown(){
   const todayStr = new Date().toISOString().slice(0,10);
   const counts = {};
-  DB.employees.forEach(e=>{
+  DB.employees.filter(e=>e.status==="Active").forEach(e=>{
     const st = statusForDay(e.id, todayStr);
     counts[st] = (counts[st]||0) + 1;
   });
@@ -782,7 +782,7 @@ function renderDashboard(){
   </div>`;
 
   if(currentRole === "Admin" || currentRole === "Director"){
-    const lopRisk = DB.employees.map(e=>({emp:e, shortfall: computeMonthlyShortfall(e.id, now.getMonth()+1, now.getFullYear())}))
+    const lopRisk = DB.employees.filter(e=>e.status==="Active").map(e=>({emp:e, shortfall: computeMonthlyShortfall(e.id, now.getMonth()+1, now.getFullYear())}))
       .filter(x=>x.shortfall >= ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS)
       .sort((a,b)=>b.shortfall-a.shortfall);
 
@@ -900,19 +900,12 @@ function renderMyDashboard(){
 
   const now = new Date();
   const shortfall = currentEmpId ? computeMonthlyShortfall(currentEmpId, now.getMonth()+1, now.getFullYear()) : 0;
-  const balance = currentEmpId ? leaveBalance(currentEmpId, now.getFullYear()) : null;
 
   return `
   <div class="grid grid-2">
     <div class="stat"><div class="lbl">Today's Attendance</div><div class="val">${status}</div></div>
     <div class="stat"><div class="lbl">Welcome</div><div class="val">${emp ? emp.name : "—"}</div></div>
   </div>
-  ${balance ? `
-  <div class="grid grid-3">
-    <div class="stat"><div class="lbl">Casual Leave Balance</div><div class="val">${balance.Casual.balance} / ${balance.Casual.quota}</div></div>
-    <div class="stat"><div class="lbl">Sick Leave Balance</div><div class="val">${balance.Sick.balance} / ${balance.Sick.quota}</div></div>
-    <div class="stat"><div class="lbl">Earned Leave Balance</div><div class="val">${balance.Earned.balance} / ${balance.Earned.quota}</div></div>
-  </div>` : ''}
   ${shortfall >= 0.05 ? `
   <div class="card">
     <h2>This Month's Hours</h2>
@@ -1068,7 +1061,7 @@ async function importEmployeesCsv(text){
 }
 
 let employeeSearch = "";
-let employeeStatusFilter = "";
+let employeeStatusFilter = "Active"; // hide inactive/resigned employees from the default view
 let selectedEmployeeIds = new Set();
 
 function renderEmployees(){
@@ -1841,6 +1834,8 @@ function renderBalanceSheet(){
 
 // ============================= PAYSLIP =============================
 let payslipState = {empId:null, month:null, year:null};
+let bulkEmailSelectedIds = new Set();
+let bulkEmailSelectionKey = null;
 function renderPayslip(){
   const periods = distinctPeriods();
   const scoped = currentRole==="Employee";
@@ -1870,17 +1865,49 @@ function renderPayslip(){
       <button class="btn ghost" id="loadPayslipBtn">Load</button>
       <button class="btn gold" id="downloadPdfBtn">Download PDF</button>
       <button class="btn gold" id="emailPayslipBtn">Email Payslip</button>
-      ${scoped ? '' : `<button class="btn gold" id="emailAllPayslipsBtn">Email All Payslips (this period)</button>`}
     </div>
     ${scoped ? '' : `
     <label class="helptext" style="display:flex;align-items:center;gap:6px;margin-top:8px;">
       <input type="checkbox" id="ps_testMode" style="width:auto;"> Send as test to my own email (${currentUser?currentUser.email:''}) instead of the employee's
-    </label>
-    <p class="helptext" id="bulkEmailProgress"></p>`}
+    </label>`}
   </div>`;
 
+  let bulkEmailCardHtml = "";
+  if(!scoped){
+    const bulkTargets = DB.employees.filter(e=>DB.payroll.some(p=>p.empId===e.id && p.month===payslipState.month && p.year===payslipState.year));
+    const periodKey = payslipState.month+"-"+payslipState.year;
+    if(bulkEmailSelectionKey !== periodKey){
+      bulkEmailSelectedIds = new Set(bulkTargets.filter(e=>e.status==="Active").map(e=>e.id));
+      bulkEmailSelectionKey = periodKey;
+    }
+    bulkEmailCardHtml = `
+    <div class="card">
+      <h2>Bulk Email Payslips — ${monthName(payslipState.month)} ${payslipState.year}</h2>
+      <div class="sub">Pick who to send to. Inactive/resigned employees are unchecked by default — check them individually if you do want to send.</div>
+      <div class="row">
+        <button type="button" class="btn ghost sm" id="bulkSelectAllBtn">Select All</button>
+        <button type="button" class="btn ghost sm" id="bulkSelectNoneBtn">Select None</button>
+        <button type="button" class="btn ghost sm" id="bulkSelectActiveBtn">Select Active Only</button>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th></th><th>ID</th><th>Name</th><th>Status</th><th>Email</th></tr></thead>
+          <tbody>${bulkTargets.map(e=>`
+            <tr>
+              <td><input type="checkbox" class="bulkEmpCheck" data-id="${e.id}" ${bulkEmailSelectedIds.has(e.id)?'checked':''}></td>
+              <td>${e.id}</td><td>${e.name}</td>
+              <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span></td>
+              <td>${e.email || '<span class="helptext">no email on file</span>'}</td>
+            </tr>`).join("") || `<tr><td colspan="5" class="empty">No payroll records for this period yet — run Payroll first.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <button class="btn gold" id="emailAllPayslipsBtn" style="margin-top:10px;">Email Selected Payslips (${bulkEmailSelectedIds.size})</button>
+      <p class="helptext" id="bulkEmailProgress"></p>
+    </div>`;
+  }
+
   if(!calc){
-    return selectorHtml + `<div class="card"><div class="empty">No payroll record found for this employee/month. Run Payroll for this period first.</div></div>`;
+    return selectorHtml + `<div class="card"><div class="empty">No payroll record found for this employee/month. Run Payroll for this period first.</div></div>` + bulkEmailCardHtml;
   }
 
   const dojDate = calc.emp.doj ? new Date(calc.emp.doj+"T00:00:00") : null;
@@ -1936,7 +1963,7 @@ function renderPayslip(){
     </div>
   </div>`;
 
-  return selectorHtml + `<div class="card">${payslipHtml}</div>`;
+  return selectorHtml + `<div class="card">${payslipHtml}</div>` + bulkEmailCardHtml;
 }
 
 // ============================= ACCOUNTING (legacy simple tab) =============================
@@ -2105,7 +2132,7 @@ function isOnApprovedLeave(empId, dateStr){
 // days so far (Sundays and approved-leave days excluded, future days excluded).
 function computeMonthlyShortfall(empId, month, year){
   const emp = DB.employees.find(e=>e.id===empId);
-  if(!emp) return 0;
+  if(!emp || emp.status !== "Active") return 0; // inactive/resigned employees aren't tracked for shortfall/LOP
   const totalDays = daysInMonth(year, month);
   const todayStr = new Date().toISOString().slice(0,10);
   let shortfall = 0;
@@ -2128,7 +2155,7 @@ function renderAttendance(){
     return renderMyAttendance();
   }
 
-  const rows = DB.employees.map(e=>{
+  const rows = DB.employees.filter(e=>e.status==="Active").map(e=>{
     const sessions = sessionsForDay(e.id, attDate);
     const hrs = hoursForDay(e.id, attDate);
     const override = DB.attendance.find(a=>a.date===attDate&&a.empId===e.id);
@@ -2151,7 +2178,7 @@ function renderAttendance(){
   }).join("");
 
   const summary = ["Present","Half Day","Absent","On Leave","Weekly Off","Holiday"].map(s=>{
-    const count = DB.employees.filter(e=>statusForDay(e.id, attDate)===s).length;
+    const count = DB.employees.filter(e=>e.status==="Active" && statusForDay(e.id, attDate)===s).length;
     return `<div class="stat"><div class="lbl">${s}</div><div class="val">${count}</div></div>`;
   }).join("");
 
@@ -3362,6 +3389,28 @@ function attachHandlers(){
     if(emailBtn) emailBtn.onclick = emailPayslip;
     const emailAllBtn = document.getElementById("emailAllPayslipsBtn");
     if(emailAllBtn) emailAllBtn.onclick = emailAllPayslips;
+
+    document.querySelectorAll(".bulkEmpCheck").forEach(cb=>cb.onchange=()=>{
+      if(cb.checked) bulkEmailSelectedIds.add(cb.dataset.id); else bulkEmailSelectedIds.delete(cb.dataset.id);
+      renderAll();
+    });
+    const selAllBtn = document.getElementById("bulkSelectAllBtn");
+    if(selAllBtn) selAllBtn.onclick = ()=>{
+      document.querySelectorAll(".bulkEmpCheck").forEach(cb=>bulkEmailSelectedIds.add(cb.dataset.id));
+      renderAll();
+    };
+    const selNoneBtn = document.getElementById("bulkSelectNoneBtn");
+    if(selNoneBtn) selNoneBtn.onclick = ()=>{
+      bulkEmailSelectedIds.clear();
+      renderAll();
+    };
+    const selActiveBtn = document.getElementById("bulkSelectActiveBtn");
+    if(selActiveBtn) selActiveBtn.onclick = ()=>{
+      bulkEmailSelectedIds.clear();
+      DB.employees.filter(e=>e.status==="Active" && DB.payroll.some(p=>p.empId===e.id && p.month===payslipState.month && p.year===payslipState.year))
+        .forEach(e=>bulkEmailSelectedIds.add(e.id));
+      renderAll();
+    };
   }
 
   if(activeTab==="Accounting"){
@@ -4038,9 +4087,9 @@ async function emailAllPayslips(){
   if(bulkEmailInProgress){ toast("Already sending payslips, please wait.", true); return; }
   const testCb = document.getElementById("ps_testMode");
   const testEmail = (testCb && testCb.checked) ? currentUser.email : null;
-  const targets = DB.employees.filter(e=>DB.payroll.some(p=>p.empId===e.id && p.month===payslipState.month && p.year===payslipState.year));
-  if(!targets.length){ toast("No payroll records found for this period.", true); return; }
-  if(!confirm((testEmail ? `TEST MODE — all payslips will go to ${testEmail} instead.\n\n` : '') + `Email payslips to ${targets.length} employee(s) for ${monthName(payslipState.month)} ${payslipState.year}?`)) return;
+  const targets = DB.employees.filter(e=>bulkEmailSelectedIds.has(e.id));
+  if(!targets.length){ toast("No employees selected. Check the ones you want to email in the Bulk Email Payslips list.", true); return; }
+  if(!confirm((testEmail ? `TEST MODE — all payslips will go to ${testEmail} instead.\n\n` : '') + `Email payslips to ${targets.length} selected employee(s) for ${monthName(payslipState.month)} ${payslipState.year}?`)) return;
 
   bulkEmailInProgress = true;
   const originalEmpId = payslipState.empId;
