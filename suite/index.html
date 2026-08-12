@@ -1578,8 +1578,7 @@ function employeesForPeriod(month, year){
 // ============================= PAYROLL =============================
 let payrollPeriod = null;
 function renderPayroll(){
-  const periods = distinctPeriods();
-  if(!payrollPeriod){ payrollPeriod = periods.length ? periods[periods.length-1] : {month:new Date().getMonth()+1, year:new Date().getFullYear()}; }
+  if(!payrollPeriod){ payrollPeriod = {month:new Date().getMonth()+1, year:new Date().getFullYear()}; }
   const activeEmployees = employeesForPeriod(payrollPeriod.month, payrollPeriod.year);
   const entries = activeEmployees.map(emp=>{
     let entry = DB.payroll.find(p=>p.month===payrollPeriod.month&&p.year===payrollPeriod.year&&p.empId===emp.id);
@@ -1660,8 +1659,7 @@ function renderPayroll(){
 // ============================= PAYMENTS =============================
 let paymentsPeriod = null;
 function renderPayments(){
-  const periods = distinctPeriods();
-  if(!paymentsPeriod){ paymentsPeriod = periods.length ? periods[periods.length-1] : {month:new Date().getMonth()+1, year:new Date().getFullYear()}; }
+  if(!paymentsPeriod){ paymentsPeriod = {month:new Date().getMonth()+1, year:new Date().getFullYear()}; }
   const todayStr = new Date().toISOString().slice(0,10);
   const entries = DB.payroll.filter(p=>p.month===paymentsPeriod.month&&p.year===paymentsPeriod.year);
   const rows = entries.map(pe=>{
