@@ -670,7 +670,7 @@ function computePayroll(entry){
   const avail = availableDays(emp.doj, entry.year, entry.month, totalDays);
   const lopDays = (entry.lopHours||0) / ATTENDANCE_TARGET_HOURS;
   const payable = Math.max(0, avail - (entry.leaves||0) - lopDays);
-  const structure = structureFor(emp.id, entry.year, entry.month);
+  const structure = structureFor(emp.id, entry.month, entry.year);
   const basic = structure ? structure.basic : (emp.basic||0);
   const hra = structure ? structure.hra : (emp.hra||0);
   const components = structure ? (structure.components||[]) : (emp.other ? [{name:"Other Allowance", amount:emp.other}] : []);
@@ -729,7 +729,7 @@ function computeProductionIncentive(units, slabs){
 // leaves, 0 LOP hours); "quality" rules pay the highest tier whose minimum
 // quality % is met; "production" rules pay the marginal slab incentive.
 function computeBonusEarnings(entry){
-  const structure = structureFor(entry.empId, entry.year, entry.month);
+  const structure = structureFor(entry.empId, entry.month, entry.year);
   const plan = structure && structure.bonusPlanId ? DB.bonusPlans.find(p=>p.id===structure.bonusPlanId) : null;
   const rules = plan ? (plan.rules||[]) : [];
   const earned = [];
