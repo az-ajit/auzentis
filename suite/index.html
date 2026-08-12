@@ -1429,6 +1429,7 @@ let salStructDraftComponents = []; // [{name,amount}] — extra buckets like Att
 let salStructDraftBonusPlanId = null;
 let salStructEffMonth = null;
 let salStructEffYear = null;
+let salStructEditingId = null; // set when editing an existing (current/future) revision via its Edit button
 
 function resetSalStructDraft(){
   const now = new Date();
@@ -1439,6 +1440,28 @@ function resetSalStructDraft(){
   salStructDraftBonusPlanId = struct ? (struct.bonusPlanId||null) : null;
   salStructEffMonth = now.getMonth()+1;
   salStructEffYear = now.getFullYear();
+  salStructEditingId = null;
+}
+
+// A revision is "past" once its effective month has already begun — those
+// are locked (no Edit/Delete) so history stays trustworthy. Current/future
+// revisions can still be freely corrected before they take full effect.
+function isSalStructPast(s){
+  const now = new Date();
+  const curY = now.getFullYear(), curM = now.getMonth()+1;
+  return (s.effYear < curY) || (s.effYear===curY && s.effMonth < curM);
+}
+
+function startEditSalStruct(id){
+  const s = DB.salaryStructures.find(x=>x.id===id);
+  if(!s) return;
+  salStructEditingId = id;
+  salStructDraftBasic = s.basic;
+  salStructDraftHra = s.hra;
+  salStructDraftComponents = (s.components||[]).map(c=>({...c}));
+  salStructDraftBonusPlanId = s.bonusPlanId||null;
+  salStructEffMonth = s.effMonth;
+  salStructEffYear = s.effYear;
 }
 
 // Reads whatever is currently in the DOM into the draft state before any
@@ -1487,11 +1510,12 @@ function renderSalaryStructureCard(){
   const history = DB.salaryStructures.filter(s=>s.empId===salStructEmpId).sort((a,b)=>(b.effYear-a.effYear)||(b.effMonth-a.effMonth));
   const historyHtml = history.length ? `
     <div class="tablewrap"><table>
-      <thead><tr><th>Effective From</th><th>Basic</th><th>HRA</th><th>Extra Buckets</th><th>Bonus Plan</th><th>Total</th></tr></thead>
+      <thead><tr><th>Effective From</th><th>Basic</th><th>HRA</th><th>Extra Buckets</th><th>Bonus Plan</th><th>Total</th><th></th></tr></thead>
       <tbody>${history.map(s=>{
         const total = s.basic+s.hra+(s.components||[]).reduce((a,c)=>a+c.amount,0);
         const bucketsStr = (s.components||[]).map(c=>`${c.name}: ₹${fmt0(c.amount)}`).join(", ") || "—";
-        return `<tr><td>${monthName(s.effMonth)} ${s.effYear}</td><td class="num">${fmt0(s.basic)}</td><td class="num">${fmt0(s.hra)}</td><td>${escapeHtml(bucketsStr)}</td><td>${escapeHtml(planName(s.bonusPlanId))}</td><td class="num"><b>${fmt0(total)}</b></td></tr>`;
+        const past = isSalStructPast(s);
+        return `<tr data-id="${s.id}"><td>${monthName(s.effMonth)} ${s.effYear}</td><td class="num">${fmt0(s.basic)}</td><td class="num">${fmt0(s.hra)}</td><td>${escapeHtml(bucketsStr)}</td><td>${escapeHtml(planName(s.bonusPlanId))}</td><td class="num"><b>${fmt0(total)}</b></td><td>${past ? '<span class="helptext">locked</span>' : `<button type="button" class="btn ghost sm editSalStructBtn" data-id="${s.id}">Edit</button> <button type="button" class="btn danger sm delSalStructBtn" data-id="${s.id}">Delete</button>`}</td></tr>`;
       }).join("")}</tbody>
     </table></div>` : `<div class="empty">No revision history yet.</div>`;
 
@@ -1513,7 +1537,8 @@ function renderSalaryStructureCard(){
     <h3>Current Structure${emp?` — ${emp.name}`:''}</h3>
     ${currentHtml}
 
-    <h3>Revise Salary</h3>
+    <h3>${salStructEditingId ? 'Edit Revision' : 'Revise Salary'}</h3>
+    ${salStructEditingId ? `<p class="helptext">Editing the ${monthName(salStructEffMonth)} ${salStructEffYear} revision. <button type="button" class="btn ghost sm" id="cancelSalStructEditBtn">Cancel, add new instead</button></p>` : ''}
     <div class="grid grid-4">
       <div class="field"><label>Basic (₹)</label><input type="number" id="salStructBasic" value="${salStructDraftBasic}"></div>
       <div class="field"><label>HRA (₹)</label><input type="number" id="salStructHra" value="${salStructDraftHra}"></div>
@@ -1533,7 +1558,7 @@ function renderSalaryStructureCard(){
       <button type="button" class="btn ghost sm" id="addBucketBtn">+ Add Bucket</button>
     </div>
     <div class="row" style="margin-top:10px;">
-      <button class="btn gold" id="saveSalStructBtn">Save New Structure</button>
+      <button class="btn gold" id="saveSalStructBtn">${salStructEditingId ? 'Save Changes' : 'Save New Structure'}</button>
     </div>
 
     <h3>Revision History</h3>
@@ -3939,6 +3964,27 @@ function attachHandlers(){
       salStructDraftComponents.splice(parseInt(b.dataset.idx), 1);
       renderAll();
     });
+    document.querySelectorAll(".editSalStructBtn").forEach(b=>b.onclick=()=>{
+      startEditSalStruct(b.dataset.id);
+      renderAll();
+      const el = document.getElementById("salStructBasic");
+      if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+    });
+    document.querySelectorAll(".delSalStructBtn").forEach(b=>b.onclick=async ()=>{
+      const id = b.dataset.id;
+      if(!confirm("Delete this salary revision? This can't be undone.")) return;
+      DB.salaryStructures = DB.salaryStructures.filter(s=>s.id!==id);
+      await save("salaryStructures");
+      await logAudit("delete", "salary_structures", id, null);
+      if(salStructEditingId===id) resetSalStructDraft();
+      toast("Revision deleted.");
+      renderAll();
+    });
+    const cancelSalStructEditBtn = document.getElementById("cancelSalStructEditBtn");
+    if(cancelSalStructEditBtn) cancelSalStructEditBtn.onclick = ()=>{
+      resetSalStructDraft();
+      renderAll();
+    };
     const saveSalStructBtn = document.getElementById("saveSalStructBtn");
     if(saveSalStructBtn) saveSalStructBtn.onclick = async ()=>{
       syncSalStructDraftFromDom();
@@ -3953,12 +3999,23 @@ function attachHandlers(){
         return;
       }
       const emp = DB.employees.find(x=>x.id===salStructEmpId);
-      DB.salaryStructures.push({
-        id: newId("SS"), empId: salStructEmpId, effMonth: salStructEffMonth, effYear: salStructEffYear,
+      // Update in place if we're explicitly editing a revision, or if one
+      // already exists for this employee+month+year — prevents duplicate
+      // rows (which made "current structure" ambiguous) instead of always
+      // appending a new one.
+      let target = salStructEditingId ? DB.salaryStructures.find(s=>s.id===salStructEditingId) : null;
+      if(!target) target = DB.salaryStructures.find(s=>s.empId===salStructEmpId && s.effMonth===salStructEffMonth && s.effYear===salStructEffYear);
+      const values = {
         basic: salStructDraftBasic, hra: salStructDraftHra,
         components: components.map(c=>({name:c.name.trim(), amount:c.amount})),
-        bonusPlanId: salStructDraftBonusPlanId || null
-      });
+        bonusPlanId: salStructDraftBonusPlanId || null,
+        effMonth: salStructEffMonth, effYear: salStructEffYear
+      };
+      if(target){
+        Object.assign(target, values);
+      } else {
+        DB.salaryStructures.push({ id: newId("SS"), empId: salStructEmpId, ...values });
+      }
       await save("salaryStructures");
       await logAudit("update", "salary_structures", salStructEmpId, {effMonth:salStructEffMonth, effYear:salStructEffYear});
       toast(`Salary structure updated for ${emp?emp.name:salStructEmpId}, effective ${monthName(salStructEffMonth)} ${salStructEffYear}.`);
