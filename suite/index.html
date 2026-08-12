@@ -276,7 +276,8 @@ const DEFAULT_SETTINGS = {
   esiEmpPct:0.0075, esiErPct:0.0325, esiCeiling:21000,
   ptSlab1:7500, ptAmt1:0, ptSlab2:10000, ptAmt2:175, ptAmt3:200,
   casualLeaveQuota:12, sickLeaveQuota:8, earnedLeaveQuota:15,
-  officeLat: null, officeLng: null, officeRadiusM: 150
+  officeLat: null, officeLng: null, officeRadiusM: 150,
+  bonusRules: [] // [{id,name,type:"attendance",amount} | {id,name,type:"quality",tiers:[{minPct,amount}]}]
 };
 
 const SEED_EMPLOYEES = [
@@ -314,8 +315,10 @@ const TABLE_CONFIG = {
     toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null}),
     fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||''}) },
   payroll:      { table:"payroll",
-    toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds,lop_hours:p.lopHours||0}),
-    fromRow:r=>({id:r.id,month:r.month,year:r.year,empId:r.emp_id,leaves:Number(r.leaves),tds:Number(r.tds),lopHours:Number(r.lop_hours||0)}) },
+    toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds,lop_hours:p.lopHours||0,
+      quality:(p.quality===null||p.quality===undefined)?null:p.quality, bonuses:p.bonuses||[]}),
+    fromRow:r=>({id:r.id,month:r.month,year:r.year,empId:r.emp_id,leaves:Number(r.leaves),tds:Number(r.tds),lopHours:Number(r.lop_hours||0),
+      quality:(r.quality===null||r.quality===undefined)?null:Number(r.quality), bonuses:r.bonuses||[]}) },
   payments:     { table:"payments",
     toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,amount_paid:p.amountPaid,payment_date:p.paymentDate||null,mode:p.mode,advance_given:p.advanceGiven,advance_recovered:p.advanceRecovered,remarks:p.remarks}),
     fromRow:r=>({id:r.id,month:r.month,year:r.year,empId:r.emp_id,amountPaid:Number(r.amount_paid),paymentDate:r.payment_date,mode:r.mode,advanceGiven:Number(r.advance_given),advanceRecovered:Number(r.advance_recovered),remarks:r.remarks}) },
@@ -438,7 +441,7 @@ async function loadDB(){
   try{
     const { data: srow } = await sb.from("settings").select("*").eq("id", 1).maybeSingle();
     if(srow && srow.data){
-      DB.settings = srow.data;
+      DB.settings = {...DEFAULT_SETTINGS, ...srow.data}; // fills in fields added after this settings row was first saved
     } else {
       DB.settings = DEFAULT_SETTINGS;
       await sb.from("settings").upsert({ id: 1, data: DEFAULT_SETTINGS });
@@ -663,7 +666,13 @@ function computePayroll(entry){
   const components = structure ? (structure.components||[]) : (emp.other ? [{name:"Other Allowance", amount:emp.other}] : []);
   const basicEarned = basic/totalDays*payable;
   const hraEarned = hra/totalDays*payable;
-  const componentsEarned = components.map(c=>({name:c.name, amount: c.amount/totalDays*payable}));
+  // Performance bonuses (Attendance/Quality/etc.) are flat monthly awards, not
+  // prorated like Basic/HRA/allowances. Once a period has been saved, its
+  // bonuses are frozen on the payroll row (entry.bonuses) so editing a Bonus
+  // Rule later never rewrites an already-saved month — only a live/unsaved
+  // period previews against the current rules.
+  const bonusEarnings = Array.isArray(entry.bonuses) ? entry.bonuses : computeBonusEarnings(entry);
+  const componentsEarned = components.map(c=>({name:c.name, amount: c.amount/totalDays*payable})).concat(bonusEarnings);
   const otherEarned = componentsEarned.reduce((a,c)=>a+c.amount,0);
   const gross = basicEarned+hraEarned+otherEarned;
   const s = DB.settings;
@@ -676,8 +685,30 @@ function computePayroll(entry){
   const totalDed = pfEmp+esiEmp+pt+tds;
   const netPay = gross-totalDed;
   const employerCost = gross+pfEr+esiEr;
-  return {emp, totalDays, avail, payable, lopDays, basicEarned, hraEarned, otherEarned, componentsEarned, gross,
+  return {emp, totalDays, avail, payable, lopDays, basicEarned, hraEarned, otherEarned, componentsEarned, bonusEarnings, gross,
     pfEmp, pfEr, esiEmp, esiEr, pt, tds, totalDed, netPay, employerCost};
+}
+
+// Evaluates Bonus Rules (Settings → Bonus Rules) against one payroll entry's
+// Leaves/LOP Hours/Quality %. "attendance" rules pay a flat amount for a
+// perfect month (0 leaves, 0 LOP hours); "quality" rules pay the highest
+// tier whose minimum quality % the entered Quality % meets or exceeds.
+function computeBonusEarnings(entry){
+  const rules = DB.settings.bonusRules || [];
+  const earned = [];
+  for(const rule of rules){
+    if(rule.type==="attendance"){
+      if((entry.leaves||0)===0 && (entry.lopHours||0)===0) earned.push({name:rule.name, amount:rule.amount});
+    } else if(rule.type==="quality"){
+      const q = entry.quality;
+      if(q!==null && q!==undefined && q!==""){
+        const tiers = (rule.tiers||[]).slice().sort((a,b)=>b.minPct-a.minPct);
+        const hit = tiers.find(t=>Number(q)>=t.minPct);
+        if(hit) earned.push({name:rule.name, amount:hit.amount});
+      }
+    }
+  }
+  return earned;
 }
 
 function monthName(m){ return ["","January","February","March","April","May","June","July","August","September","October","November","December"][m]; }
@@ -973,6 +1004,81 @@ function renderMyDashboard(){
 }
 
 // ============================= SETTINGS =============================
+let bonusRuleDraftName = "";
+let bonusRuleDraftType = "attendance";
+let bonusRuleDraftAmount = 0;
+let bonusRuleDraftTiers = [{minPct:98, amount:1500}];
+
+function resetBonusRuleDraft(){
+  bonusRuleDraftName = ""; bonusRuleDraftType = "attendance"; bonusRuleDraftAmount = 0;
+  bonusRuleDraftTiers = [{minPct:98, amount:1500}];
+}
+
+function syncBonusRuleDraftFromDom(){
+  const nameEl = document.getElementById("bonusRuleName");
+  const typeEl = document.getElementById("bonusRuleType");
+  const amountEl = document.getElementById("bonusRuleAmount");
+  if(nameEl) bonusRuleDraftName = nameEl.value;
+  if(typeEl) bonusRuleDraftType = typeEl.value;
+  if(amountEl) bonusRuleDraftAmount = parseFloat(amountEl.value)||0;
+  const mins = document.querySelectorAll(".tierMinInput");
+  const amts = document.querySelectorAll(".tierAmountInput");
+  if(mins.length) bonusRuleDraftTiers = Array.from(mins).map((el,i)=>({minPct:parseFloat(el.value)||0, amount:parseFloat(amts[i].value)||0}));
+}
+
+function renderBonusRulesCard(){
+  const rules = DB.settings.bonusRules || [];
+  const rulesRows = rules.map(r=>{
+    const desc = r.type==="attendance"
+      ? `0 Leaves &amp; 0 LOP Hours in the month → ₹${fmt0(r.amount)}`
+      : (r.tiers||[]).slice().sort((a,b)=>b.minPct-a.minPct).map(t=>`≥${t.minPct}% → ₹${fmt0(t.amount)}`).join(", ");
+    return `<tr data-id="${r.id}">
+      <td>${escapeHtml(r.name)}</td>
+      <td>${r.type==="attendance"?"Attendance (flat)":"Quality (tiered)"}</td>
+      <td>${desc}</td>
+      <td><button class="btn danger sm delBonusRuleBtn">Remove</button></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="4" class="empty">No bonus rules yet.</td></tr>`;
+
+  const tierRowsHtml = bonusRuleDraftTiers.map((t,i)=>`
+    <div class="row" style="margin-bottom:8px;">
+      <input type="number" class="tierMinInput" placeholder="Min Quality %" value="${t.minPct}" style="flex:1;">
+      <input type="number" class="tierAmountInput" placeholder="Amount (₹)" value="${t.amount}" style="flex:1;">
+      <button type="button" class="btn danger sm removeTierBtn" data-idx="${i}">Remove</button>
+    </div>`).join("") || `<div class="helptext" style="margin-bottom:8px;">No tiers yet.</div>`;
+
+  return `
+  <div class="card">
+    <h2>Bonus Rules</h2>
+    <div class="sub">Applied automatically in Payroll every month, based on that period's Leaves/LOP Hours and the Quality % you enter per employee — no manual bucket needed. Saving a month's payroll freezes its bonuses, so editing a rule later never rewrites an already-saved month.</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Name</th><th>Type</th><th>Rule</th><th></th></tr></thead>
+        <tbody>${rulesRows}</tbody>
+      </table>
+    </div>
+    <h3>Add Rule</h3>
+    <div class="grid grid-4">
+      <div class="field"><label>Name</label><input id="bonusRuleName" placeholder="e.g. Attendance Bonus" value="${escapeHtml(bonusRuleDraftName)}"></div>
+      <div class="field"><label>Type</label>
+        <select id="bonusRuleType">
+          <option value="attendance" ${bonusRuleDraftType==='attendance'?'selected':''}>Attendance — flat bonus for a perfect month</option>
+          <option value="quality" ${bonusRuleDraftType==='quality'?'selected':''}>Quality — tiered by monthly Quality %</option>
+        </select>
+      </div>
+      ${bonusRuleDraftType==="attendance" ? `<div class="field"><label>Bonus Amount (₹)</label><input type="number" id="bonusRuleAmount" value="${bonusRuleDraftAmount}"></div>` : ''}
+    </div>
+    ${bonusRuleDraftType==="quality" ? `
+      <label class="helptext">Tiers — the highest minimum Quality % that's met wins</label>
+      <div id="bonusTierRows">${tierRowsHtml}</div>
+      <div class="row"><button type="button" class="btn ghost sm" id="addTierBtn">+ Add Tier</button></div>
+    ` : ''}
+    <div class="row" style="margin-top:10px;">
+      <button class="btn gold" id="addBonusRuleBtn">Add Rule</button>
+    </div>
+  </div>`;
+}
+
 function renderSettings(){
   const s = DB.settings;
   return `
@@ -1035,7 +1141,8 @@ function renderSettings(){
           </tr>`).join("") || `<tr><td colspan="3" class="empty">No holidays added yet.</td></tr>`}</tbody>
       </table>
     </div>
-  </div>`;
+  </div>
+  ${renderBonusRulesCard()}`;
 }
 
 // ============================= EMPLOYEES =============================
@@ -1335,33 +1442,39 @@ function renderPayroll(){
     if(!entry){
       const shortfall = computeMonthlyShortfall(emp.id, payrollPeriod.month, payrollPeriod.year);
       const suggestedLop = shortfall >= ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS ? shortfall : 0;
-      entry = {month:payrollPeriod.month, year:payrollPeriod.year, empId:emp.id, leaves:0, tds:0, lopHours: Math.round(suggestedLop*100)/100};
+      entry = {month:payrollPeriod.month, year:payrollPeriod.year, empId:emp.id, leaves:0, tds:0, lopHours: Math.round(suggestedLop*100)/100, quality:null, bonuses:undefined};
     }
     return entry;
   });
   const results = entries.map(computePayroll).filter(Boolean);
   const totals = results.reduce((a,r)=>({gross:a.gross+r.gross,net:a.net+r.netPay,ded:a.ded+r.totalDed}),{gross:0,net:0,ded:0});
 
-  const rows = results.map(r=>`
+  const rows = results.map(r=>{
+    const entry = entries.find(e=>e.empId===r.emp.id);
+    const bonusTotal = r.bonusEarnings.reduce((a,b)=>a+b.amount,0);
+    const bonusTitle = r.bonusEarnings.length ? r.bonusEarnings.map(b=>`${b.name}: ₹${fmt0(b.amount)}`).join(", ") : "No bonus rules matched";
+    return `
     <tr data-emp="${r.emp.id}" data-search="${escapeHtml((r.emp.id+' '+r.emp.name).toLowerCase())}">
       <td>${r.emp.id}</td><td>${r.emp.name}</td>
       <td class="num">${r.totalDays}</td>
       <td class="num">${r.avail}</td>
-      <td class="num"><input type="number" min="0" class="badge-input leavesInput" value="${entries.find(e=>e.empId===r.emp.id).leaves}" data-emp="${r.emp.id}"></td>
-      <td class="num"><input type="number" min="0" step="0.25" class="badge-input lopInput" value="${entries.find(e=>e.empId===r.emp.id).lopHours||0}" data-emp="${r.emp.id}" title="Auto-suggested from attendance shortfall — editable"></td>
-      <td class="num">${r.payable}</td>
+      <td class="num"><input type="number" min="0" class="badge-input leavesInput" value="${entry.leaves}" data-emp="${r.emp.id}"></td>
+      <td class="num"><input type="number" min="0" step="0.25" class="badge-input lopInput" value="${entry.lopHours||0}" data-emp="${r.emp.id}" title="Auto-suggested from attendance shortfall — editable"></td>
+      <td class="num"><input type="number" min="0" max="100" step="0.1" class="badge-input qualityInput" value="${entry.quality==null?'':entry.quality}" data-emp="${r.emp.id}" placeholder="—" title="Quality % for this month, used by Quality bonus rules"></td>
+      <td class="num">${round2(r.payable)}</td>
+      <td class="num" title="${escapeHtml(bonusTitle)}">${bonusTotal>0?fmt0(bonusTotal):'—'}</td>
       <td class="num">${fmt(r.gross)}</td>
       <td class="num">${fmt(r.pfEmp)}</td>
       <td class="num">${fmt(r.esiEmp)}</td>
       <td class="num">${fmt0(r.pt)}</td>
-      <td class="num"><input type="number" min="0" class="badge-input tdsInput" value="${entries.find(e=>e.empId===r.emp.id).tds}" data-emp="${r.emp.id}"></td>
+      <td class="num"><input type="number" min="0" class="badge-input tdsInput" value="${entry.tds}" data-emp="${r.emp.id}"></td>
       <td class="num"><b>${fmt(r.netPay)}</b></td>
-    </tr>`).join("");
+    </tr>`;}).join("");
 
   return `
   <div class="card">
     <h2>Payroll — ${monthName(payrollPeriod.month)} ${payrollPeriod.year}</h2>
-    <div class="sub">Enter Leaves (and TDS if applicable) — everything else calculates automatically. LOP Hours is auto-suggested from attendance shortfall (${ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS}h+ monthly shortfall) but you can adjust it before saving.</div>
+    <div class="sub">Enter Leaves (and TDS if applicable) — everything else calculates automatically. LOP Hours is auto-suggested from attendance shortfall (${ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS}h+ monthly shortfall) but you can adjust it before saving. Quality % feeds any Quality bonus rules (set up in Settings → Bonus Rules) — leave blank if not applicable. Bonuses shown are a live preview until you Save; saving freezes them so a later Bonus Rule change never rewrites this month.</div>
     <div class="row">
       <div class="field" style="max-width:140px;"><label>Month</label><select id="payMonth">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===payrollPeriod.month?'selected':''}>${monthName(m)}</option>`).join("")}</select></div>
       <div class="field" style="max-width:120px;"><label>Year</label><input type="number" id="payYear" value="${payrollPeriod.year}"></div>
@@ -1371,9 +1484,9 @@ function renderPayroll(){
     <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="payrollSearchInput" placeholder="Search by employee name or ID… (filters view only, doesn't affect totals)"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>Total Days</th><th>Available</th><th>Leaves</th><th>LOP Hours</th><th>Payable</th><th>Gross Earned</th><th>PF (Emp)</th><th>ESI (Emp)</th><th>PT</th><th>TDS</th><th>Net Pay</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="13" class="empty">No employees found.</td></tr>`}</tbody>
-        <tfoot><tr><td colspan="7"><b>Total</b></td><td class="num"><b>${fmt(totals.gross)}</b></td><td colspan="3"></td><td></td><td class="num"><b>${fmt(totals.net)}</b></td></tr></tfoot>
+        <thead><tr><th>ID</th><th>Name</th><th>Total Days</th><th>Available</th><th>Leaves</th><th>LOP Hours</th><th>Quality %</th><th>Payable</th><th>Bonus</th><th>Gross Earned</th><th>PF (Emp)</th><th>ESI (Emp)</th><th>PT</th><th>TDS</th><th>Net Pay</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="15" class="empty">No employees found.</td></tr>`}</tbody>
+        <tfoot><tr><td colspan="9"><b>Total</b></td><td class="num"><b>${fmt(totals.gross)}</b></td><td colspan="3"></td><td></td><td class="num"><b>${fmt(totals.net)}</b></td></tr></tfoot>
       </table>
     </div>
   </div>`;
@@ -2197,7 +2310,7 @@ function renderPayslip(){
         ${isJoiningMonth
           ? `<div><span class="lbl">Date of Joining</span><span class="val">${calc.emp.doj}</span></div>`
           : `<div><span class="lbl">Salary Date</span><span class="val">${salaryDate}</span></div>`}
-        <div><span class="lbl">Payable Days</span><span class="val">${calc.payable} / ${calc.totalDays}</span></div>
+        <div><span class="lbl">Payable Days</span><span class="val">${round2(calc.payable)} / ${calc.totalDays}</span></div>
       </div>
       <table>
         <thead><tr><th>Earnings</th><th class="num">Amount (₹)</th><th>Deductions</th><th class="num">Amount (₹)</th></tr></thead>
@@ -3386,6 +3499,7 @@ function attachHandlers(){
   if(activeTab==="Settings"){
     document.getElementById("saveSettingsBtn").onclick = async ()=>{
       DB.settings = {
+        ...DB.settings, // preserves fields this form doesn't edit, e.g. bonusRules
         pfEmpPct: parseFloat(val("pfEmpPct"))/100, pfErPct: parseFloat(val("pfErPct"))/100, pfCeiling: parseFloat(val("pfCeiling")),
         esiEmpPct: parseFloat(val("esiEmpPct"))/100, esiErPct: parseFloat(val("esiErPct"))/100, esiCeiling: parseFloat(val("esiCeiling")),
         ptSlab1: parseFloat(val("ptSlab1")), ptAmt1: parseFloat(val("ptAmt1")),
@@ -3437,6 +3551,50 @@ function attachHandlers(){
       await loadHolidays();
       await logAudit("delete", "holidays", date, null);
       toast("Holiday removed.");
+      renderAll();
+    });
+
+    const bonusRuleTypeSel = document.getElementById("bonusRuleType");
+    if(bonusRuleTypeSel) bonusRuleTypeSel.onchange = ()=>{ syncBonusRuleDraftFromDom(); renderAll(); };
+    const addTierBtn = document.getElementById("addTierBtn");
+    if(addTierBtn) addTierBtn.onclick = ()=>{
+      syncBonusRuleDraftFromDom();
+      bonusRuleDraftTiers.push({minPct:0, amount:0});
+      renderAll();
+    };
+    document.querySelectorAll(".removeTierBtn").forEach(b=>b.onclick=()=>{
+      syncBonusRuleDraftFromDom();
+      bonusRuleDraftTiers.splice(parseInt(b.dataset.idx), 1);
+      renderAll();
+    });
+    const addBonusRuleBtn = document.getElementById("addBonusRuleBtn");
+    if(addBonusRuleBtn) addBonusRuleBtn.onclick = async ()=>{
+      syncBonusRuleDraftFromDom();
+      const name = bonusRuleDraftName.trim();
+      if(!name){ toast("Enter a rule name.", true); return; }
+      let rule;
+      if(bonusRuleDraftType==="attendance"){
+        if(!(bonusRuleDraftAmount>0)){ toast("Bonus amount must be greater than 0.", true); return; }
+        rule = {id:newId("BR"), name, type:"attendance", amount:bonusRuleDraftAmount};
+      } else {
+        const tiers = bonusRuleDraftTiers.filter(t=>t.amount>0);
+        if(!tiers.length){ toast("Add at least one tier with an amount greater than 0.", true); return; }
+        rule = {id:newId("BR"), name, type:"quality", tiers};
+      }
+      DB.settings.bonusRules = (DB.settings.bonusRules||[]).concat(rule);
+      await save("settings");
+      await logAudit("create", "settings", rule.id, {bonusRule:name});
+      toast("Bonus rule added.");
+      resetBonusRuleDraft();
+      renderAll();
+    };
+    document.querySelectorAll(".delBonusRuleBtn").forEach(b=>b.onclick=async (e)=>{
+      const id = e.target.closest("tr").dataset.id;
+      if(!confirm("Remove this bonus rule? Already-saved months keep their frozen bonus; only future months stop applying this rule.")) return;
+      DB.settings.bonusRules = (DB.settings.bonusRules||[]).filter(r=>r.id!==id);
+      await save("settings");
+      await logAudit("delete", "settings", id, null);
+      toast("Bonus rule removed.");
       renderAll();
     });
   }
@@ -3629,6 +3787,16 @@ function attachHandlers(){
       });
       document.querySelectorAll(".lopInput").forEach(inp=>{
         upsertPayroll(payrollPeriod.month, payrollPeriod.year, inp.dataset.emp, {lopHours: parseFloat(inp.value)||0});
+      });
+      document.querySelectorAll(".qualityInput").forEach(inp=>{
+        const q = inp.value.trim()==="" ? null : parseFloat(inp.value);
+        upsertPayroll(payrollPeriod.month, payrollPeriod.year, inp.dataset.emp, {quality: q});
+      });
+      // Freeze bonuses now, using the just-entered Leaves/LOP/Quality — so a
+      // future Bonus Rule edit never silently changes this saved month.
+      document.querySelectorAll(".leavesInput").forEach(inp=>{
+        const entry = DB.payroll.find(p=>p.month===payrollPeriod.month&&p.year===payrollPeriod.year&&p.empId===inp.dataset.emp);
+        if(entry) entry.bonuses = computeBonusEarnings(entry);
       });
       await save("payroll");
       await logAudit("update", "payroll", `${payrollPeriod.month}/${payrollPeriod.year}`, null);
@@ -4409,7 +4577,7 @@ function val(id){ const el=document.getElementById(id); return el?el.value:""; }
 
 function upsertPayroll(month,year,empId,patch){
   let e = DB.payroll.find(p=>p.month===month&&p.year===year&&p.empId===empId);
-  if(!e){ e = {month,year,empId,leaves:0,tds:0}; DB.payroll.push(e); }
+  if(!e){ e = {month,year,empId,leaves:0,tds:0,lopHours:0,quality:null,bonuses:[]}; DB.payroll.push(e); }
   Object.assign(e, patch);
 }
 function upsertPayment(month,year,empId,patch){
