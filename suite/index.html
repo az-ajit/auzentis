@@ -239,12 +239,12 @@ let currentUser = null;    // {id, email}
 let currentProfile = null; // {id, name, role, emp_id}
 
 // ============================= STATE =============================
-const TABS = ["Dashboard","Settings","Employees","Payroll","Payments","Payslip","Accounting","Books","Attendance","Leaves","CRM","Reports","Team"];
+const TABS = ["Dashboard","Settings","Employees","Payroll","Payments","Payslip","Books","Attendance","Leaves","CRM","Reports","Team"];
 const ROLE_TABS = {
   "Admin": TABS,
   "Director": TABS,
   "HR": ["Dashboard","Employees","Attendance","Leaves","Payroll","Payments","Payslip","Reports"],
-  "Accounts": ["Dashboard","Settings","Payroll","Payments","Payslip","Accounting","Books","Reports"],
+  "Accounts": ["Dashboard","Settings","Payroll","Payments","Payslip","Books","Reports"],
   "Sales": ["Dashboard","CRM","Reports"],
   "Employee": ["Dashboard","Attendance"]
 };
@@ -724,7 +724,6 @@ function renderAll(){
   else if(activeTab==="Payroll") main.innerHTML = renderPayroll();
   else if(activeTab==="Payments") main.innerHTML = renderPayments();
   else if(activeTab==="Payslip") main.innerHTML = renderPayslip();
-  else if(activeTab==="Accounting") main.innerHTML = renderAccounting();
   else if(activeTab==="Books") main.innerHTML = renderBooks();
   else if(activeTab==="Attendance") main.innerHTML = renderAttendance();
   else if(activeTab==="Leaves") main.innerHTML = renderLeaves();
