@@ -267,7 +267,8 @@ let DB = {
   holidays: [],  // {date,name}
   ledgerAccounts: [], // Chart of Accounts
   vouchers: [],       // Sales/Purchase/Payment/Receipt/Journal/Contra
-  voucherLines: []    // double-entry Dr/Cr lines per voucher
+  voucherLines: [],   // double-entry Dr/Cr lines per voucher
+  salaryStructures: [] // {id,empId,effMonth,effYear,basic,hra,components:[{name,amount}]} — full revision history, never overwritten
 };
 
 const DEFAULT_SETTINGS = {
@@ -335,7 +336,10 @@ const TABLE_CONFIG = {
     fromRow:r=>({id:r.id,empId:r.emp_id,type:r.type,fromDate:r.from_date,toDate:r.to_date,reason:r.reason,status:r.status}) },
   leads:        { table:"leads",
     toRow:l=>({id:l.id,name:l.name,company:l.company,contact:l.contact,value:l.value,stage:l.stage,next_follow_up:l.nextFollowUp||null,notes:l.notes}),
-    fromRow:r=>({id:r.id,name:r.name,company:r.company,contact:r.contact,value:Number(r.value),stage:r.stage,nextFollowUp:r.next_follow_up,notes:r.notes}) }
+    fromRow:r=>({id:r.id,name:r.name,company:r.company,contact:r.contact,value:Number(r.value),stage:r.stage,nextFollowUp:r.next_follow_up,notes:r.notes}) },
+  salaryStructures: { table:"salary_structures",
+    toRow:s=>({id:s.id,emp_id:s.empId,eff_month:s.effMonth,eff_year:s.effYear,basic:s.basic,hra:s.hra,components:s.components||[]}),
+    fromRow:r=>({id:r.id,empId:r.emp_id,effMonth:r.eff_month,effYear:r.eff_year,basic:Number(r.basic),hra:Number(r.hra),components:r.components||[]}) }
 };
 
 // ============================= AUTH =============================
@@ -455,6 +459,19 @@ async function loadDB(){
       DB.payroll = SEED_PAYROLL.slice();
       await save("employees");
       await save("payroll");
+    }
+
+    // One-time bootstrap: every employee's existing flat basic/hra/other becomes
+    // their initial salary structure, effective from their DOJ — so every past
+    // payslip computes to exactly the same numbers as before, while future
+    // revisions go through salary_structures instead of overwriting employees.
+    if(DB.salaryStructures.length === 0 && DB.employees.length > 0){
+      DB.salaryStructures = DB.employees.map(e=>{
+        const d = e.doj ? new Date(e.doj+"T00:00:00") : new Date();
+        return { id:newId("SS"), empId:e.id, effMonth:d.getMonth()+1, effYear:d.getFullYear(),
+          basic:e.basic||0, hra:e.hra||0, components: e.other ? [{name:"Other Allowance", amount:e.other}] : [] };
+      });
+      await save("salaryStructures");
     }
   }catch(err){
     console.error(err);
@@ -616,6 +633,23 @@ function availableDays(doj, year, month, totalDays){
   return totalDays;
 }
 
+// The salary structure in force for a given payroll period: the latest
+// revision whose effective date is on or before that period. Revisions are
+// never backdated (enforced in the Salary Structure UI), so a past period
+// always resolves to the structure that was actually in force then, even if
+// the structure gets revised again later.
+function structureFor(empId, month, year){
+  const candidates = DB.salaryStructures.filter(s=>s.empId===empId &&
+    (s.effYear<year || (s.effYear===year && s.effMonth<=month)));
+  if(!candidates.length) return null;
+  candidates.sort((a,b)=> (b.effYear-a.effYear) || (b.effMonth-a.effMonth));
+  return candidates[0];
+}
+function currentStructureFor(empId){
+  const now = new Date();
+  return structureFor(empId, now.getMonth()+1, now.getFullYear());
+}
+
 function computePayroll(entry){
   const emp = DB.employees.find(e=>e.id===entry.empId);
   if(!emp) return null;
@@ -623,9 +657,14 @@ function computePayroll(entry){
   const avail = availableDays(emp.doj, entry.year, entry.month, totalDays);
   const lopDays = (entry.lopHours||0) / ATTENDANCE_TARGET_HOURS;
   const payable = Math.max(0, avail - (entry.leaves||0) - lopDays);
-  const basicEarned = emp.basic/totalDays*payable;
-  const hraEarned = emp.hra/totalDays*payable;
-  const otherEarned = emp.other/totalDays*payable;
+  const structure = structureFor(emp.id, entry.year, entry.month);
+  const basic = structure ? structure.basic : (emp.basic||0);
+  const hra = structure ? structure.hra : (emp.hra||0);
+  const components = structure ? (structure.components||[]) : (emp.other ? [{name:"Other Allowance", amount:emp.other}] : []);
+  const basicEarned = basic/totalDays*payable;
+  const hraEarned = hra/totalDays*payable;
+  const componentsEarned = components.map(c=>({name:c.name, amount: c.amount/totalDays*payable}));
+  const otherEarned = componentsEarned.reduce((a,c)=>a+c.amount,0);
   const gross = basicEarned+hraEarned+otherEarned;
   const s = DB.settings;
   const pfEmp = Math.min(basicEarned, s.pfCeiling)*s.pfEmpPct;
@@ -637,7 +676,7 @@ function computePayroll(entry){
   const totalDed = pfEmp+esiEmp+pt+tds;
   const netPay = gross-totalDed;
   const employerCost = gross+pfEr+esiEr;
-  return {emp, totalDays, avail, payable, lopDays, basicEarned, hraEarned, otherEarned, gross,
+  return {emp, totalDays, avail, payable, lopDays, basicEarned, hraEarned, otherEarned, componentsEarned, gross,
     pfEmp, pfEr, esiEmp, esiEr, pt, tds, totalDed, netPay, employerCost};
 }
 
@@ -1052,21 +1091,26 @@ async function importEmployeesCsv(text){
     let id = idxId>=0 ? (r[idxId]||"").trim() : "";
     if(!id) id = nextEmpId();
     if(DB.employees.some(e=>e.id===id)){ skipped++; continue; }
+    const doj = (idxDoj>=0 && r[idxDoj]) ? r[idxDoj].trim() : "2026-01-01";
+    const basic = idxBasic>=0 ? (parseFloat(r[idxBasic])||0) : 0;
+    const hra = idxHra>=0 ? (parseFloat(r[idxHra])||0) : 0;
+    const other = idxOther>=0 ? (parseFloat(r[idxOther])||0) : 0;
     DB.employees.push({
-      id, name,
-      doj: (idxDoj>=0 && r[idxDoj]) ? r[idxDoj].trim() : "2026-01-01",
+      id, name, doj,
       dob: idxDob>=0 ? (r[idxDob]||"").trim() : "",
       email: idxEmail>=0 ? (r[idxEmail]||"").trim() : "",
       resignDate: idxResign>=0 ? (r[idxResign]||"").trim() : "",
       status: (idxStatus>=0 && r[idxStatus]) ? r[idxStatus].trim() : "Active",
-      basic: idxBasic>=0 ? (parseFloat(r[idxBasic])||0) : 0,
-      hra: idxHra>=0 ? (parseFloat(r[idxHra])||0) : 0,
-      other: idxOther>=0 ? (parseFloat(r[idxOther])||0) : 0,
+      basic, hra, other,
     });
+    const d = new Date(doj+"T00:00:00");
+    DB.salaryStructures.push({ id:newId("SS"), empId:id, effMonth:d.getMonth()+1, effYear:d.getFullYear(),
+      basic, hra, components: other ? [{name:"Other Allowance", amount:other}] : [] });
     imported++;
   }
   if(imported){
     await save("employees");
+    await save("salaryStructures");
     await logAudit("bulk_import", "employees", null, {imported, skipped});
   }
   toast(`Imported ${imported} employee(s)${skipped?`, skipped ${skipped} (missing name or duplicate ID)`:''}.`);
@@ -1085,7 +1129,12 @@ function renderEmployees(){
     filtered = filtered.filter(e=>[e.id,e.name,e.email].some(v=>v && v.toLowerCase().includes(q)));
   }
   const { pageItems, page, totalPages, total } = paginate(filtered, "employees", 20);
-  const rows = pageItems.map(e=>`
+  const rows = pageItems.map(e=>{
+    const struct = currentStructureFor(e.id);
+    const basic = struct ? struct.basic : (e.basic||0);
+    const hra = struct ? struct.hra : (e.hra||0);
+    const other = struct ? (struct.components||[]).reduce((a,c)=>a+c.amount,0) : (e.other||0);
+    return `
     <tr data-id="${e.id}">
       <td><input type="checkbox" class="rowCheck empCheck" data-id="${e.id}" ${selectedEmployeeIds.has(e.id)?'checked':''}></td>
       <td>${e.id}</td>
@@ -1095,15 +1144,16 @@ function renderEmployees(){
       <td>${e.email||'—'}</td>
       <td class="hide-tablet">${e.resignDate||'—'}</td>
       <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span></td>
-      <td class="num hide-tablet">${fmt0(e.basic)}</td>
-      <td class="num hide-tablet">${fmt0(e.hra)}</td>
-      <td class="num hide-tablet">${fmt0(e.other)}</td>
-      <td class="num"><b>${fmt0(e.basic+e.hra+e.other)}</b></td>
+      <td class="num hide-tablet">${fmt0(basic)}</td>
+      <td class="num hide-tablet">${fmt0(hra)}</td>
+      <td class="num hide-tablet">${fmt0(other)}</td>
+      <td class="num"><b>${fmt0(basic+hra+other)}</b></td>
       <td class="actions">
         <button class="btn ghost sm editEmpBtn">Edit</button>
+        <button class="btn ghost sm salStructBtn">Salary</button>
         <button class="btn danger sm delEmpBtn">Delete</button>
       </td>
-    </tr>`).join("");
+    </tr>`;}).join("");
   return `
   <div class="card">
     <h2>Employee Master</h2>
@@ -1140,14 +1190,128 @@ function renderEmployees(){
       <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
       <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
       <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
-      <div class="field"><label>Basic (₹)</label><input type="number" id="f_basic" value="0"></div>
-      <div class="field"><label>HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
-      <div class="field"><label>Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
+    </div>
+    <p class="helptext" id="salaryFieldsNote" style="display:none;">Salary is managed in the Salary Structure panel below — click "Salary" on this employee's row.</p>
+    <div class="grid grid-4" id="salaryFieldsGroup">
+      <div class="field"><label>Starting Basic (₹)</label><input type="number" id="f_basic" value="0"></div>
+      <div class="field"><label>Starting HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
+      <div class="field"><label>Starting Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
     </div>
     <div class="row">
       <button class="btn gold" id="saveEmpBtn">Save Employee</button>
       <button class="btn ghost" id="cancelEmpBtn" style="display:none;">Cancel Edit</button>
     </div>
+  </div>
+  ${renderSalaryStructureCard()}`;
+}
+
+// ============================= SALARY STRUCTURE =============================
+// Revising salary never overwrites history — it appends a new structure row
+// effective from a chosen month (never earlier than the current month, so
+// past payroll and payslips can never change). computePayroll() always looks
+// up whichever structure was actually in force for the period being paid.
+let salStructEmpId = null;
+let salStructDraftBasic = 0;
+let salStructDraftHra = 0;
+let salStructDraftComponents = []; // [{name,amount}] — extra buckets like Attendance Bonus, Performance Bonus, etc.
+let salStructEffMonth = null;
+let salStructEffYear = null;
+
+function resetSalStructDraft(){
+  const now = new Date();
+  const struct = salStructEmpId ? currentStructureFor(salStructEmpId) : null;
+  salStructDraftBasic = struct ? struct.basic : 0;
+  salStructDraftHra = struct ? struct.hra : 0;
+  salStructDraftComponents = struct ? (struct.components||[]).map(c=>({...c})) : [];
+  salStructEffMonth = now.getMonth()+1;
+  salStructEffYear = now.getFullYear();
+}
+
+// Reads whatever is currently in the DOM into the draft state before any
+// action that triggers a re-render (add/remove bucket row) — otherwise
+// unsaved edits in Basic/HRA/bucket fields would be wiped by that re-render.
+function syncSalStructDraftFromDom(){
+  const basicEl = document.getElementById("salStructBasic");
+  const hraEl = document.getElementById("salStructHra");
+  const effMonthEl = document.getElementById("salStructEffMonth");
+  const effYearEl = document.getElementById("salStructEffYear");
+  if(basicEl) salStructDraftBasic = parseFloat(basicEl.value)||0;
+  if(hraEl) salStructDraftHra = parseFloat(hraEl.value)||0;
+  if(effMonthEl) salStructEffMonth = parseInt(effMonthEl.value);
+  if(effYearEl) salStructEffYear = parseInt(effYearEl.value)||salStructEffYear;
+  const names = document.querySelectorAll(".bucketNameInput");
+  const amounts = document.querySelectorAll(".bucketAmountInput");
+  salStructDraftComponents = Array.from(names).map((el,i)=>({name:el.value, amount: parseFloat(amounts[i].value)||0}));
+}
+
+function renderSalaryStructureCard(){
+  if(!DB.employees.length) return "";
+  if(!salStructEmpId || !DB.employees.some(e=>e.id===salStructEmpId)){
+    salStructEmpId = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id))[0].id;
+    resetSalStructDraft();
+  }
+  if(salStructEffMonth===null) resetSalStructDraft();
+  const emp = DB.employees.find(e=>e.id===salStructEmpId);
+  const currentStruct = currentStructureFor(salStructEmpId);
+
+  const currentHtml = currentStruct ? `
+    <div class="tablewrap"><table>
+      <thead><tr><th>Basic</th><th>HRA</th>${(currentStruct.components||[]).map(c=>`<th>${escapeHtml(c.name)}</th>`).join("")}<th>Total</th><th>Effective From</th></tr></thead>
+      <tbody><tr>
+        <td class="num">${fmt0(currentStruct.basic)}</td><td class="num">${fmt0(currentStruct.hra)}</td>
+        ${(currentStruct.components||[]).map(c=>`<td class="num">${fmt0(c.amount)}</td>`).join("")}
+        <td class="num"><b>${fmt0(currentStruct.basic+currentStruct.hra+(currentStruct.components||[]).reduce((a,c)=>a+c.amount,0))}</b></td>
+        <td>${monthName(currentStruct.effMonth)} ${currentStruct.effYear}</td>
+      </tr></tbody>
+    </table></div>` : `<div class="empty">No salary structure set for this employee yet.</div>`;
+
+  const history = DB.salaryStructures.filter(s=>s.empId===salStructEmpId).sort((a,b)=>(b.effYear-a.effYear)||(b.effMonth-a.effMonth));
+  const historyHtml = history.length ? `
+    <div class="tablewrap"><table>
+      <thead><tr><th>Effective From</th><th>Basic</th><th>HRA</th><th>Extra Buckets</th><th>Total</th></tr></thead>
+      <tbody>${history.map(s=>{
+        const total = s.basic+s.hra+(s.components||[]).reduce((a,c)=>a+c.amount,0);
+        const bucketsStr = (s.components||[]).map(c=>`${c.name}: ₹${fmt0(c.amount)}`).join(", ") || "—";
+        return `<tr><td>${monthName(s.effMonth)} ${s.effYear}</td><td class="num">${fmt0(s.basic)}</td><td class="num">${fmt0(s.hra)}</td><td>${escapeHtml(bucketsStr)}</td><td class="num"><b>${fmt0(total)}</b></td></tr>`;
+      }).join("")}</tbody>
+    </table></div>` : `<div class="empty">No revision history yet.</div>`;
+
+  const bucketRowsHtml = salStructDraftComponents.map((c,i)=>`
+    <div class="row" style="margin-bottom:8px;">
+      <input type="text" class="bucketNameInput" placeholder="e.g. Attendance Bonus, Performance Bonus, Production Incentive" value="${escapeHtml(c.name)}" style="flex:2;">
+      <input type="number" class="bucketAmountInput" placeholder="Amount (₹)" value="${c.amount}" style="flex:1;">
+      <button type="button" class="btn danger sm removeBucketBtn" data-idx="${i}">Remove</button>
+    </div>`).join("") || `<div class="helptext" style="margin-bottom:8px;">No extra buckets yet.</div>`;
+
+  return `
+  <div class="card">
+    <h2>Salary Structure</h2>
+    <div class="sub">Revisions apply from a chosen month onward only — past payroll and payslips are never recalculated.</div>
+    <div class="field" style="max-width:320px;"><label>Employee</label>
+      <select id="salStructEmpSelect">${DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(e=>`<option value="${e.id}" ${e.id===salStructEmpId?'selected':''}>${e.id} — ${e.name}</option>`).join("")}</select>
+    </div>
+
+    <h3>Current Structure${emp?` — ${emp.name}`:''}</h3>
+    ${currentHtml}
+
+    <h3>Revise Salary</h3>
+    <div class="grid grid-4">
+      <div class="field"><label>Basic (₹)</label><input type="number" id="salStructBasic" value="${salStructDraftBasic}"></div>
+      <div class="field"><label>HRA (₹)</label><input type="number" id="salStructHra" value="${salStructDraftHra}"></div>
+      <div class="field"><label>Effective Month</label><select id="salStructEffMonth">${[1,2,3,4,5,6,7,8,9,10,11,12].map(m=>`<option value="${m}" ${m===salStructEffMonth?'selected':''}>${monthName(m)}</option>`).join("")}</select></div>
+      <div class="field"><label>Effective Year</label><input type="number" id="salStructEffYear" value="${salStructEffYear}"></div>
+    </div>
+    <label class="helptext">Extra Buckets (Attendance Bonus, Performance Bonus, Quality Bonus, Production Incentive, Employee of the Month, etc.)</label>
+    <div id="bucketRows">${bucketRowsHtml}</div>
+    <div class="row">
+      <button type="button" class="btn ghost sm" id="addBucketBtn">+ Add Bucket</button>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn gold" id="saveSalStructBtn">Save New Structure</button>
+    </div>
+
+    <h3>Revision History</h3>
+    ${historyHtml}
   </div>`;
 }
 
@@ -1454,6 +1618,37 @@ async function saveVoucher(voucher, lines){
       debit:r.debit, credit:r.credit, lineNarration:r.line_narration}));
     return true;
   }catch(e){ console.error(e); toast("Could not save voucher: " + e.message, true); return false; }
+}
+
+// CRM → Books: when a lead is marked Won, offer to post a matching Sales
+// voucher so closed deals flow into the ledger instead of needing a second
+// manual entry. Finds or creates a Sundry Debtor account for the lead's
+// company/name; amount is the lead's pipeline value at face value (no GST
+// split, since CRM doesn't track that) — editable/deletable in Books after.
+async function createLeadWonVoucher(lead){
+  const acctName = lead.company || lead.name;
+  let account = DB.ledgerAccounts.find(a=>a.isParty && a.partyType==="Debtor" && a.name.toLowerCase()===acctName.toLowerCase());
+  if(!account){
+    const id = newId("ACC");
+    const row = { id, name: acctName, acc_group:"Sundry Debtors", nature:"Asset", is_party:true, party_type:"Debtor",
+      opening_balance:0, opening_balance_type:"Dr", is_system:false };
+    const { error } = await sb.from("ledger_accounts").insert(row);
+    if(error){ toast("Could not create customer account: " + error.message, true); return false; }
+    account = {id, name:acctName, accGroup:"Sundry Debtors", nature:"Asset", isParty:true, partyType:"Debtor",
+      openingBalance:0, openingBalanceType:"Dr", isSystem:false};
+    DB.ledgerAccounts.push(account);
+  }
+  const vid = newId("VCH");
+  const amount = lead.value||0;
+  const voucher = {id:vid, voucherType:"Sales", voucherNo:nextVoucherNo("Sales"), date:new Date().toISOString().slice(0,10),
+    partyId:account.id, narration:`CRM deal won — ${lead.name}${lead.company?' ('+lead.company+')':''}`};
+  const lines = [{accountId:account.id, debit:amount, credit:0},{accountId:SYS_ACCOUNTS.sales, debit:0, credit:amount}];
+  const ok = await saveVoucher(voucher, lines);
+  if(ok){
+    await logAudit("create", "vouchers", vid, {source:"CRM lead won", leadId:lead.id});
+    toast(`Sales voucher created in Books for ${account.name} (₹${fmt0(amount)}).`);
+  }
+  return ok;
 }
 
 async function deleteVoucher(voucherId){
@@ -2009,7 +2204,8 @@ function renderPayslip(){
         <tbody>
           <tr><td>Basic</td><td class="num">${fmt(calc.basicEarned)}</td><td>PF (Employee)</td><td class="num">${fmt(calc.pfEmp)}</td></tr>
           <tr><td>HRA</td><td class="num">${fmt(calc.hraEarned)}</td><td>ESI (Employee)</td><td class="num">${fmt(calc.esiEmp)}</td></tr>
-          <tr><td>Other Allowance</td><td class="num">${fmt(calc.otherEarned)}</td><td>Professional Tax</td><td class="num">${fmt0(calc.pt)}</td></tr>
+          ${calc.componentsEarned.map((c,i)=>`<tr><td>${escapeHtml(c.name)}</td><td class="num">${fmt(c.amount)}</td><td>${i===0?'Professional Tax':''}</td><td class="num">${i===0?fmt0(calc.pt):''}</td></tr>`).join("")}
+          ${calc.componentsEarned.length===0 ? `<tr><td></td><td class="num"></td><td>Professional Tax</td><td class="num">${fmt0(calc.pt)}</td></tr>` : ''}
           <tr><td></td><td class="num"></td><td>TDS</td><td class="num">${fmt(calc.tds)}</td></tr>
           <tr><td><b>Gross Earnings</b></td><td class="num"><b>${fmt(calc.gross)}</b></td><td><b>Total Deductions</b></td><td class="num"><b>${fmt(calc.totalDed)}</b></td></tr>
         </tbody>
@@ -2848,7 +3044,12 @@ const REPORT_DEFS = {
     dateNote: "Filtered by Date of Joining.",
     rows(from,to){
       return DB.employees.filter(e=>dateInRange(e.doj, from, to))
-        .map(e=>[e.id,e.name,e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,e.basic,e.hra,e.other,e.basic+e.hra+e.other]);
+        .map(e=>{
+          const s = currentStructureFor(e.id);
+          const basic = s ? s.basic : (e.basic||0), hra = s ? s.hra : (e.hra||0);
+          const other = s ? (s.components||[]).reduce((a,c)=>a+c.amount,0) : (e.other||0);
+          return [e.id,e.name,e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,basic,hra,other,basic+hra+other];
+        });
     }
   },
   payroll: {
@@ -3256,8 +3457,18 @@ function attachHandlers(){
       document.getElementById("f_basic").value = emp.basic;
       document.getElementById("f_hra").value = emp.hra;
       document.getElementById("f_other").value = emp.other;
+      document.getElementById("salaryFieldsGroup").style.display = "none";
+      document.getElementById("salaryFieldsNote").style.display = "block";
       document.getElementById("cancelEmpBtn").style.display = "inline-block";
       window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"});
+    });
+    document.querySelectorAll(".salStructBtn").forEach(b=>b.onclick=(e)=>{
+      const id = e.target.closest("tr").dataset.id;
+      salStructEmpId = id;
+      resetSalStructDraft();
+      renderAll();
+      const sel = document.getElementById("salStructEmpSelect");
+      if(sel) sel.scrollIntoView({behavior:"smooth", block:"center"});
     });
     document.querySelectorAll(".delEmpBtn").forEach(b=>b.onclick=async (e)=>{
       const id = e.target.closest("tr").dataset.id;
@@ -3290,6 +3501,10 @@ function attachHandlers(){
         DB.employees[idx] = record;
       } else {
         DB.employees.push(record);
+        const d = new Date(doj+"T00:00:00");
+        DB.salaryStructures.push({ id:newId("SS"), empId:id, effMonth:d.getMonth()+1, effYear:d.getFullYear(),
+          basic, hra, components: other ? [{name:"Other Allowance", amount:other}] : [] });
+        await save("salaryStructures");
       }
       await save("employees");
       await logAudit(editingId ? "update" : "create", "employees", id, {name});
@@ -3345,6 +3560,49 @@ function attachHandlers(){
       await logAudit("bulk_delete", "employees", null, {ids});
       selectedEmployeeIds.clear();
       toast(`${ids.length} employee(s) deleted.`);
+      renderAll();
+    };
+
+    const salStructEmpSelect = document.getElementById("salStructEmpSelect");
+    if(salStructEmpSelect) salStructEmpSelect.onchange = (e)=>{
+      salStructEmpId = e.target.value;
+      resetSalStructDraft();
+      renderAll();
+    };
+    const addBucketBtn = document.getElementById("addBucketBtn");
+    if(addBucketBtn) addBucketBtn.onclick = ()=>{
+      syncSalStructDraftFromDom();
+      salStructDraftComponents.push({name:"", amount:0});
+      renderAll();
+    };
+    document.querySelectorAll(".removeBucketBtn").forEach(b=>b.onclick=()=>{
+      syncSalStructDraftFromDom();
+      salStructDraftComponents.splice(parseInt(b.dataset.idx), 1);
+      renderAll();
+    });
+    const saveSalStructBtn = document.getElementById("saveSalStructBtn");
+    if(saveSalStructBtn) saveSalStructBtn.onclick = async ()=>{
+      syncSalStructDraftFromDom();
+      if(!salStructEmpId){ toast("Select an employee.", true); return; }
+      if(salStructDraftBasic<0 || salStructDraftHra<0){ toast("Basic and HRA cannot be negative.", true); return; }
+      const components = salStructDraftComponents.filter(c=>c.name.trim());
+      if(components.some(c=>c.amount<0)){ toast("Bucket amounts cannot be negative.", true); return; }
+      const now = new Date();
+      const minYear = now.getFullYear(), minMonth = now.getMonth()+1;
+      if(salStructEffYear < minYear || (salStructEffYear===minYear && salStructEffMonth < minMonth)){
+        toast("Effective date can't be in the past — pick the current month or later, so past payroll and payslips stay untouched.", true);
+        return;
+      }
+      const emp = DB.employees.find(x=>x.id===salStructEmpId);
+      DB.salaryStructures.push({
+        id: newId("SS"), empId: salStructEmpId, effMonth: salStructEffMonth, effYear: salStructEffYear,
+        basic: salStructDraftBasic, hra: salStructDraftHra,
+        components: components.map(c=>({name:c.name.trim(), amount:c.amount}))
+      });
+      await save("salaryStructures");
+      await logAudit("update", "salary_structures", salStructEmpId, {effMonth:salStructEffMonth, effYear:salStructEffYear});
+      toast(`Salary structure updated for ${emp?emp.name:salStructEmpId}, effective ${monthName(salStructEffMonth)} ${salStructEffYear}.`);
+      resetSalStructDraft();
       renderAll();
     };
   }
@@ -3916,8 +4174,14 @@ function attachHandlers(){
       await save("leads"); toast("Lead deleted."); renderAll();
     });
     document.querySelectorAll(".leadStage").forEach(sel=>sel.onchange=async ()=>{
-      const lead = DB.leads.find(l=>l.id===sel.dataset.id); if(lead) lead.stage = sel.value;
-      await save("leads"); renderAll();
+      const lead = DB.leads.find(l=>l.id===sel.dataset.id); if(!lead) return;
+      const newlyWon = sel.value==="Won" && lead.stage!=="Won";
+      lead.stage = sel.value;
+      await save("leads");
+      if(newlyWon && lead.value>0 && confirm(`Mark this deal Won and create a matching Sales voucher in Books for ${lead.company||lead.name} (₹${fmt0(lead.value)})?`)){
+        await createLeadWonVoucher(lead);
+      }
+      renderAll();
     });
     document.querySelectorAll(".leadFollowUp").forEach(inp=>inp.onchange=async ()=>{
       const lead = DB.leads.find(l=>l.id===inp.dataset.id); if(lead) lead.nextFollowUp = inp.value;
