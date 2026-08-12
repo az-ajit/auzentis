@@ -1138,12 +1138,21 @@ function renderEmployees(){
   </div>`;
 }
 
+// Employees whose employment overlaps this period at all — i.e. everyone
+// except those who had already resigned before the period started. Someone
+// who resigns mid-period still shows (for their prorated final pay); a
+// period entirely after their resignation date excludes them.
+function employeesForPeriod(month, year){
+  const periodStart = `${year}-${String(month).padStart(2,"0")}-01`;
+  return DB.employees.filter(e => !e.resignDate || e.resignDate >= periodStart);
+}
+
 // ============================= PAYROLL =============================
 let payrollPeriod = null;
 function renderPayroll(){
   const periods = distinctPeriods();
   if(!payrollPeriod){ payrollPeriod = periods.length ? periods[periods.length-1] : {month:new Date().getMonth()+1, year:new Date().getFullYear()}; }
-  const activeEmployees = DB.employees; // include inactive too, in case of mid-month exits; simplest: show all
+  const activeEmployees = employeesForPeriod(payrollPeriod.month, payrollPeriod.year);
   const entries = activeEmployees.map(emp=>{
     let entry = DB.payroll.find(p=>p.month===payrollPeriod.month&&p.year===payrollPeriod.year&&p.empId===emp.id);
     if(!entry){
@@ -1589,11 +1598,20 @@ function renderVouchersView(){
     ${form}
   </div>
   <div class="card">
+    <h2>Import Vouchers from CSV</h2>
+    <div class="sub">For bulk-adding Payment/Receipt transactions (e.g. from a bank statement or spreadsheet). Each row needs an Account name that already exists in your Chart of Accounts — the other side always posts to Bank Account.</div>
+    <div class="row">
+      <button class="btn ghost" id="downloadVoucherCsvTemplateBtn">Download CSV Template</button>
+      <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importVoucherCsvInput" accept=".csv" style="display:none;"></label>
+    </div>
+  </div>
+  <div class="card">
     <h2>Day Book</h2>
     <div class="row">
       <div class="field" style="max-width:160px;"><label>From</label><input type="date" id="db_from" value="${booksDayRange.from}"></div>
       <div class="field" style="max-width:160px;"><label>To</label><input type="date" id="db_to" value="${booksDayRange.to}"></div>
       <button class="btn ghost" id="loadDayBookBtn">Apply</button>
+      <button class="btn gold" id="exportDayBookBtn">Export CSV</button>
     </div>
     <div class="tablewrap">
       <table>
@@ -1602,6 +1620,45 @@ function renderVouchersView(){
       </table>
     </div>
   </div>`;
+}
+
+// Minimal CSV importer for Payment/Receipt vouchers — Account must match an
+// existing Chart of Accounts entry by name; the other side of every entry
+// posts to Bank Account.
+async function importVouchersCsv(text){
+  const rows = parseCsv(text);
+  if(rows.length < 2){ toast("CSV has no data rows.", true); return; }
+  const header = rows[0].map(h=>h.trim().toLowerCase());
+  const col = (name)=>header.indexOf(name);
+  const idxDate = col("date"), idxType = col("type"), idxAccount = col("account"), idxAmount = col("amount"), idxNarration = col("narration");
+  if(idxDate===-1 || idxType===-1 || idxAccount===-1 || idxAmount===-1){
+    toast("CSV must have Date, Type, Account, and Amount columns.", true); return;
+  }
+  let imported = 0, skipped = 0;
+  const skippedReasons = [];
+  for(const r of rows.slice(1)){
+    const date = (r[idxDate]||"").trim();
+    const type = (r[idxType]||"").trim();
+    const accountName = (r[idxAccount]||"").trim();
+    const amount = parseFloat(r[idxAmount]);
+    const narration = idxNarration>=0 ? (r[idxNarration]||"").trim() : "";
+    if(!date || !["Payment","Receipt"].includes(type) || !accountName || !(amount>0)){
+      skipped++; skippedReasons.push(`"${accountName||date||'row'}" — missing/invalid Date, Type (must be Payment or Receipt), Account, or Amount`);
+      continue;
+    }
+    const account = DB.ledgerAccounts.find(a=>a.name.toLowerCase()===accountName.toLowerCase());
+    if(!account){ skipped++; skippedReasons.push(`"${accountName}" — no matching account in Chart of Accounts`); continue; }
+    const vid = newId("VCH");
+    const voucher = {id:vid, voucherType:type, voucherNo: nextVoucherNo(type), date, partyId:null, narration};
+    const lines = type==="Payment"
+      ? [{accountId:account.id, debit:amount, credit:0},{accountId:SYS_ACCOUNTS.bank, debit:0, credit:amount}]
+      : [{accountId:SYS_ACCOUNTS.bank, debit:amount, credit:0},{accountId:account.id, debit:0, credit:amount}];
+    const ok = await saveVoucher(voucher, lines);
+    if(ok) imported++; else { skipped++; skippedReasons.push(`"${accountName}" on ${date} — save failed`); }
+  }
+  await logAudit("bulk_import", "vouchers", null, {imported, skipped});
+  toast(`Imported ${imported} voucher(s)${skipped?`, skipped ${skipped}`:''}.` + (skippedReasons.length ? " " + skippedReasons.slice(0,5).join("; ") : ""), skipped>0);
+  renderAll();
 }
 
 function voucherFormSalesPurchase(type){
@@ -2807,16 +2864,16 @@ const REPORT_DEFS = {
     }
   },
   ledger: {
-    label: "Accounting Ledger", headers: ["Date","Account","Particulars","Debit","Credit","Balance"],
-    dateNote: "Filtered by entry date.",
+    label: "Books Ledger (All Vouchers)", headers: ["Date","Voucher No","Account","Particulars","Debit","Credit"],
+    dateNote: "Filtered by voucher date. One row per debit/credit line — see Books → Trial Balance for running balances per account.",
     rows(from,to){
-      const entries = buildLedgerEntries();
-      const balances = {};
-      return entries.map(e=>{
-        balances[e.account] = (balances[e.account]||0) + e.credit - e.debit;
-        return {...e, balance: balances[e.account]};
-      }).filter(e=>dateInRange(e.date, from, to))
-        .map(e=>[e.date,e.account,e.particulars,round2(e.debit),round2(e.credit),round2(e.balance)]);
+      const out = [];
+      DB.vouchers.filter(v=>dateInRange(v.date, from, to)).sort((a,b)=>a.date.localeCompare(b.date)).forEach(v=>{
+        DB.voucherLines.filter(l=>l.voucherId===v.id).forEach(l=>{
+          out.push([v.date, v.voucherNo||'', accName(l.accountId), v.narration||'', round2(l.debit), round2(l.credit)]);
+        });
+      });
+      return out;
     }
   },
   invoices: {
@@ -3206,10 +3263,14 @@ function attachHandlers(){
       const name = val("f_name").trim();
       if(!id || !name){ toast("Emp ID and Name are required.", true); return; }
       if(!editingId && DB.employees.some(x=>x.id===id)){ toast("Emp ID already exists.", true); return; }
+      const basic = parseFloat(val("f_basic"))||0, hra = parseFloat(val("f_hra"))||0, other = parseFloat(val("f_other"))||0;
+      if(basic<0 || hra<0 || other<0){ toast("Basic, HRA, and Other Allowance cannot be negative.", true); return; }
+      const doj = val("f_doj") || "2026-01-01", resignDate = val("f_resign") || "";
+      if(resignDate && resignDate < doj){ toast("Resigning Date cannot be before Date of Joining.", true); return; }
       const record = {
-        id, name, doj: val("f_doj") || "2026-01-01", status: val("f_status"),
-        dob: val("f_dob") || "", email: val("f_email").trim() || "", resignDate: val("f_resign") || "",
-        basic: parseFloat(val("f_basic"))||0, hra: parseFloat(val("f_hra"))||0, other: parseFloat(val("f_other"))||0
+        id, name, doj, status: val("f_status"),
+        dob: val("f_dob") || "", email: val("f_email").trim() || "", resignDate,
+        basic, hra, other
       };
       if(editingId){
         const idx = DB.employees.findIndex(x=>x.id===editingId);
@@ -3287,6 +3348,8 @@ function attachHandlers(){
       renderAll();
     };
     document.getElementById("savePayrollBtn").onclick = async ()=>{
+      const negative = Array.from(document.querySelectorAll(".leavesInput, .tdsInput, .lopInput")).some(inp=>parseFloat(inp.value)<0);
+      if(negative){ toast("Leaves, TDS, and LOP Hours cannot be negative.", true); return; }
       document.querySelectorAll(".leavesInput").forEach(inp=>{
         upsertPayroll(payrollPeriod.month, payrollPeriod.year, inp.dataset.emp, {leaves: parseFloat(inp.value)||0});
       });
@@ -3315,6 +3378,8 @@ function attachHandlers(){
       renderAll();
     };
     document.getElementById("savePaymentsBtn").onclick = async ()=>{
+      const negative = Array.from(document.querySelectorAll(".paidInput, .advGivenInput, .advRecInput")).some(inp=>parseFloat(inp.value)<0);
+      if(negative){ toast("Amount Paid, Advance Given, and Advance Recovered cannot be negative.", true); return; }
       const empIds = new Set();
       document.querySelectorAll("[data-emp]").forEach(el=>empIds.add(el.dataset.emp));
       empIds.forEach(id=>{
@@ -3529,6 +3594,32 @@ function attachHandlers(){
       document.querySelectorAll(".voucherTypeBtn").forEach(b=>b.onclick=()=>{ voucherType = b.dataset.type; renderAll(); });
       document.getElementById("loadDayBookBtn").onclick = ()=>{
         booksDayRange = {from: val("db_from"), to: val("db_to")}; renderAll();
+      };
+      document.getElementById("exportDayBookBtn").onclick = ()=>{
+        const rows = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
+          .sort((a,b)=>a.date.localeCompare(b.date))
+          .map(v=>{
+            const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
+            const total = lines.reduce((a,l)=>a+(l.debit||0),0);
+            return [v.date, v.voucherNo, v.voucherType, v.partyId?accName(v.partyId):'', v.narration||'', round2(total)];
+          });
+        exportCSV(`Auzentis_DayBook_${booksDayRange.from}_to_${booksDayRange.to}`,
+          ["Date","Voucher No","Type","Party","Narration","Amount"], rows);
+      };
+      document.getElementById("downloadVoucherCsvTemplateBtn").onclick = ()=>{
+        downloadBlob("Voucher_Import_Template.csv",
+          "Date,Type,Account,Amount,Narration\n2026-08-01,Payment,Rent Expense,16000,August Rent\n2026-08-01,Receipt,Sales Account,25000,Sample invoice payment\n",
+          "text/csv;charset=utf-8;");
+      };
+      document.getElementById("importVoucherCsvInput").onchange = (e)=>{
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = async ()=>{
+          await importVouchersCsv(String(reader.result));
+          e.target.value = "";
+        };
+        reader.readAsText(file);
       };
       document.querySelectorAll(".delVoucherBtn").forEach(b=>b.onclick=async (e)=>{
         const id = e.target.closest("tr").dataset.id;
