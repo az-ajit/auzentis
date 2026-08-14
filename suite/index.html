@@ -313,8 +313,8 @@ const SEED_PAYROLL = [
 // ============================= TABLE MAPPINGS (JS <-> Postgres) =============================
 const TABLE_CONFIG = {
   employees:    { table:"employees",
-    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null}),
-    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||''}) },
+    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null,is_remote:!!e.isRemote}),
+    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||'',isRemote:!!r.is_remote}) },
   payroll:      { table:"payroll",
     toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds,lop_hours:p.lopHours||0,
       quality:(p.quality===null||p.quality===undefined)?null:p.quality,
@@ -1355,7 +1355,7 @@ function renderEmployees(){
       <td class="hide-tablet">${e.dob||'—'}</td>
       <td>${e.email||'—'}</td>
       <td class="hide-tablet">${e.resignDate||'—'}</td>
-      <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span></td>
+      <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span>${e.isRemote?' <span class="pill ok">WFH</span>':''}</td>
       <td class="num hide-tablet">${fmt0(basic)}</td>
       <td class="num hide-tablet">${fmt0(hra)}</td>
       <td class="num hide-tablet">${fmt0(other)}</td>
@@ -1402,6 +1402,7 @@ function renderEmployees(){
       <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
       <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
       <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
+      <div class="field"><label>Work From Home</label><select id="f_remote"><option value="">Office (GPS required)</option><option value="1">Remote-eligible (skips office GPS check)</option></select></div>
     </div>
     <p class="helptext" id="salaryFieldsNote" style="display:none;">Salary is managed in the Salary Structure panel below — click "Salary" on this employee's row.</p>
     <div class="grid grid-4" id="salaryFieldsGroup">
@@ -2798,7 +2799,8 @@ function renderMyAttendance(){
   return `
   <div class="card">
     <h2>My Attendance — ${today}</h2>
-    <div class="sub">Punch in when you start work, punch out when you finish. Requires your fingerprint and being at the office. A full day is ${ATTENDANCE_TARGET_HOURS}h — under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h counts as Absent.</div>
+    <div class="sub">Punch in when you start work, punch out when you finish. Requires your fingerprint${emp.isRemote ? '' : ' and being at the office'}. A full day is ${ATTENDANCE_TARGET_HOURS}h — under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h counts as Absent.</div>
+    ${emp.isRemote ? `<p class="helptext">You're marked Work-From-Home — punching in doesn't require you to be at the office.</p>` : ''}
     ${myDevices.length === 0 ? `<p class="helptext">No fingerprint enrolled on this device yet — enroll it first.</p>` : ''}
     ${actionHtml}
     ${shortfallHtml}
@@ -2878,6 +2880,14 @@ function showBlockedScreen(msg){
 // login is reachable from outside the configured office radius.
 async function checkOfficeLocationGate(){
   if(currentProfile.role === "Admin" || currentProfile.role === "Director") return true;
+
+  // Remote-eligible (WFH) employees skip the office-radius gate entirely —
+  // checked directly via a targeted query since loadDB() (which populates
+  // DB.employees) hasn't run yet at this point in startup.
+  if(currentProfile.emp_id){
+    const { data: empRow } = await sb.from("employees").select("is_remote").eq("id", currentProfile.emp_id).maybeSingle();
+    if(empRow && empRow.is_remote) return true;
+  }
 
   const { data: srow } = await sb.from("settings").select("data").eq("id", 1).maybeSingle();
   const s = (srow && srow.data) || {};
@@ -3836,6 +3846,7 @@ function attachHandlers(){
       document.getElementById("f_email").value = emp.email||"";
       document.getElementById("f_resign").value = emp.resignDate||"";
       document.getElementById("f_status").value = emp.status;
+      document.getElementById("f_remote").value = emp.isRemote ? "1" : "";
       document.getElementById("f_basic").value = emp.basic;
       document.getElementById("f_hra").value = emp.hra;
       document.getElementById("f_other").value = emp.other;
@@ -3876,7 +3887,7 @@ function attachHandlers(){
       const record = {
         id, name, doj, status: val("f_status"),
         dob: val("f_dob") || "", email: val("f_email").trim() || "", resignDate,
-        basic, hra, other
+        basic, hra, other, isRemote: val("f_remote")==="1"
       };
       if(editingId){
         const idx = DB.employees.findIndex(x=>x.id===editingId);
