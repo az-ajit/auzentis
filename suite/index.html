@@ -1764,13 +1764,36 @@ function letterBodyText(type, emp, ctc){
       We are excited about the prospect of you joining our team and contributing to ${company}'s continued growth. Please confirm your acceptance of this offer by signing and returning a copy of this letter.<br><br>
       We look forward to welcoming you on board.`;
   }
+  if(type==="Appointment"){
+    return `Dear ${emp.name},<br><br>
+      Further to your acceptance of our offer, we are pleased to confirm your appointment as <b>${escapeHtml(designation)}</b> at ${company}, effective <b>${startDate}</b>.<br><br>
+      <b>Position:</b> ${escapeHtml(designation)}<br>
+      <b>Reporting To:</b> ${escapeHtml(letterReportingManager)}<br>
+      <b>Date of Joining:</b> ${startDate}<br>
+      <b>Annual CTC:</b> ₹${fmt0(ctc)}<br><br>
+      Your employment will be governed by the Company's policies as communicated to you from time to time. We are delighted to have you as part of the ${company} team and look forward to a mutually rewarding association.`;
+  }
+  const lastWorkingDate = letterStartDate || emp.resignDate || emp.doj;
   return `Dear ${emp.name},<br><br>
-    Further to your acceptance of our offer, we are pleased to confirm your appointment as <b>${escapeHtml(designation)}</b> at ${company}, effective <b>${startDate}</b>.<br><br>
+    This is to confirm that you were employed with ${company} as <b>${escapeHtml(designation)}</b> from <b>${emp.doj}</b> to <b>${lastWorkingDate}</b>.<br><br>
     <b>Position:</b> ${escapeHtml(designation)}<br>
-    <b>Reporting To:</b> ${escapeHtml(letterReportingManager)}<br>
-    <b>Date of Joining:</b> ${startDate}<br>
-    <b>Annual CTC:</b> ₹${fmt0(ctc)}<br><br>
-    Your employment will be governed by the Company's policies as communicated to you from time to time. We are delighted to have you as part of the ${company} team and look forward to a mutually rewarding association.`;
+    <b>Date of Joining:</b> ${emp.doj}<br>
+    <b>Last Working Date:</b> ${lastWorkingDate}<br><br>
+    During your tenure with us, we found you sincere and hardworking. All dues, if any, payable to/by you have been settled. We wish you the very best in your future endeavors.`;
+}
+
+async function buildLetterPdf(){
+  const emp = DB.employees.find(x=>x.id===letterEmpId);
+  const area = document.getElementById("letterPrintArea");
+  const canvas = await html2canvas(area, {scale:2, backgroundColor:"#ffffff"});
+  const imgData = canvas.toDataURL("image/png");
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({unit:"pt", format:"a4"});
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const imgWidth = pageWidth - 60;
+  const imgHeight = canvas.height * (imgWidth/canvas.width);
+  pdf.addImage(imgData, "PNG", 30, 30, imgWidth, imgHeight);
+  return { pdf, filename: `${letterType}_Letter_${emp?emp.name:letterEmpId}.pdf`, emp };
 }
 
 function renderOfferLetterCard(){
@@ -1791,13 +1814,16 @@ function renderOfferLetterCard(){
         <select id="letterEmpSelect">${DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(e=>`<option value="${e.id}" ${e.id===letterEmpId?'selected':''}>${e.id} - ${e.name}</option>`).join("")}</select>
       </div>
       <div class="field"><label>Letter Type</label>
-        <select id="letterTypeSelect"><option value="Offer" ${letterType==='Offer'?'selected':''}>Offer Letter</option><option value="Appointment" ${letterType==='Appointment'?'selected':''}>Appointment Letter</option></select>
+        <select id="letterTypeSelect"><option value="Offer" ${letterType==='Offer'?'selected':''}>Offer Letter</option><option value="Appointment" ${letterType==='Appointment'?'selected':''}>Appointment Letter</option><option value="Relieving" ${letterType==='Relieving'?'selected':''}>Relieving Letter</option></select>
       </div>
       <div class="field"><label>Designation</label><input type="text" id="letterDesignationInput" value="${escapeHtml(letterDesignation)}" placeholder="e.g. Executive"></div>
       <div class="field"><label>Reporting Manager</label><input type="text" id="letterManagerInput" value="${escapeHtml(letterReportingManager)}"></div>
-      <div class="field"><label>${letterType==='Offer'?'Proposed':'Effective'} Start Date</label><input type="date" id="letterStartDateInput" value="${letterStartDate}"></div>
+      <div class="field"><label>${letterType==='Offer'?'Proposed Start Date':letterType==='Appointment'?'Effective Start Date':'Last Working Date'}</label><input type="date" id="letterStartDateInput" value="${letterStartDate}"></div>
     </div>
-    <button class="btn gold" id="generateLetterBtn">Generate PDF</button>
+    <div class="row">
+      <button class="btn gold" id="generateLetterBtn">Generate PDF</button>
+      <button class="btn ghost" id="emailLetterBtn">Email to Employee</button>
+    </div>
     <div id="letterPrintArea" class="payslip" style="margin-top:20px;">
       <div class="head">
         <div class="brand-row"><img class="mark" src="${LOGO_MARK}" alt="Auzentis"><img class="wordmark" src="${LOGO_WORDMARK}" alt="Auzentis"></div>
@@ -5431,23 +5457,36 @@ function attachHandlers(){
     if(generateLetterBtn) generateLetterBtn.onclick = async ()=>{
       generateLetterBtn.disabled = true; generateLetterBtn.textContent = "Generating...";
       try{
-        const emp = DB.employees.find(x=>x.id===letterEmpId);
-        const area = document.getElementById("letterPrintArea");
-        const canvas = await html2canvas(area, {scale:2, backgroundColor:"#ffffff"});
-        const imgData = canvas.toDataURL("image/png");
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF({unit:"pt", format:"a4"});
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const imgWidth = pageWidth - 60;
-        const imgHeight = canvas.height * (imgWidth/canvas.width);
-        pdf.addImage(imgData, "PNG", 30, 30, imgWidth, imgHeight);
-        pdf.save(`${letterType}_Letter_${emp?emp.name:letterEmpId}.pdf`);
+        const { pdf, filename } = await buildLetterPdf();
+        pdf.save(filename);
         toast(`${letterType} Letter PDF downloaded.`);
       }catch(err){
         console.error(err);
         toast("Could not generate PDF: " + err.message, true);
       }finally{
         generateLetterBtn.disabled = false; generateLetterBtn.textContent = "Generate PDF";
+      }
+    };
+    const emailLetterBtn = document.getElementById("emailLetterBtn");
+    if(emailLetterBtn) emailLetterBtn.onclick = async ()=>{
+      const emp = DB.employees.find(x=>x.id===letterEmpId);
+      if(!emp || !emp.email){ toast("This employee has no email address on file. Add one in the Employees tab.", true); return; }
+      if(!confirm(`Email the ${letterType} Letter to ${emp.name} (${emp.email})?`)) return;
+      emailLetterBtn.disabled = true; emailLetterBtn.textContent = "Sending...";
+      try{
+        const { pdf, filename } = await buildLetterPdf();
+        const base64 = pdf.output("datauristring").split(",")[1];
+        const { data, error } = await sb.functions.invoke("send-letter-email", {
+          body: { emp_id: letterEmpId, letter_type: letterType, filename, pdf_base64: base64 }
+        });
+        if(error){ toast("Could not email letter: " + (await extractFnError(error)), true); return; }
+        if(data && data.error){ toast(data.error, true); return; }
+        toast(`${letterType} Letter emailed to ${emp.email}.`);
+      }catch(err){
+        console.error(err);
+        toast("Could not email letter: " + err.message, true);
+      }finally{
+        emailLetterBtn.disabled = false; emailLetterBtn.textContent = "Email to Employee";
       }
     };
   }
