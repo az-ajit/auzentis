@@ -107,6 +107,19 @@
   .dash-section-title{font-weight:700;color:var(--navy);font-size:12.5px;text-transform:uppercase;letter-spacing:.6px;margin:22px 0 10px;}
   .dash-section-title:first-of-type{margin-top:0;}
   .dash-note{color:var(--muted);font-size:12.5px;line-height:1.6;padding:12px 2px;border-top:1px solid var(--line);margin-top:8px;}
+  .form-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap;}
+  .form-tab-btn{background:transparent;border:none;color:var(--muted);padding:9px 4px;margin-right:16px;font-size:13px;cursor:pointer;font-weight:600;border-bottom:2px solid transparent;}
+  .form-tab-btn.active{color:var(--navy);border-bottom-color:var(--gold);}
+  .form-tab-btn:hover{color:var(--navy);}
+  details.collapse-card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;box-shadow:0 1px 2px rgba(20,25,50,.04);}
+  details.collapse-card > summary{list-style:none;cursor:pointer;padding:16px 18px;font-weight:700;color:var(--navy);font-size:15px;display:flex;align-items:center;justify-content:space-between;}
+  details.collapse-card > summary::-webkit-details-marker{display:none;}
+  details.collapse-card > summary::after{content:"+";font-size:18px;color:var(--muted);font-weight:400;}
+  details.collapse-card[open] > summary::after{content:"−";}
+  details.collapse-card > summary .sub{display:block;font-weight:400;color:var(--muted);font-size:12.5px;margin-top:3px;}
+  details.collapse-card > .collapse-body{padding:0 18px 18px;}
+  details.collapse-card > .collapse-body > .card{border:none;box-shadow:none;padding:0;margin:0;}
+  details.collapse-card > .collapse-body > .card > h2:first-child{display:none;}
   .stat .lbl{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
   .stat .val{font-size:22px;font-weight:700;color:var(--navy);margin-top:4px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
@@ -1593,28 +1606,19 @@ function renderEmployees(){
       <td><input type="checkbox" class="rowCheck empCheck" data-id="${e.id}" ${selectedEmployeeIds.has(e.id)?'checked':''}></td>
       <td>${e.id}</td>
       <td>${e.name}</td>
-      <td class="hide-tablet">${(e.details&&e.details.designation)||'-'}</td>
-      <td>${e.doj}</td>
-      <td class="hide-tablet">${e.dob||'-'}</td>
-      <td>${e.email||'-'}</td>
-      <td class="hide-tablet">${e.resignDate||'-'}</td>
+      <td>${(e.details&&e.details.designation)||'-'}</td>
+      <td class="hide-tablet">${(e.details&&e.details.department)||'-'}</td>
       <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span>${e.isRemote?' <span class="pill ok">WFH</span>':''}
         ${ob.total ? `<span class="pill ${ob.complete?'ok':'warn'}" title="Onboarding checklist">${ob.done}/${ob.total}</span>` : ''}</td>
-      <td class="num hide-tablet">${fmt0(basic)}</td>
-      <td class="num hide-tablet">${fmt0(hra)}</td>
-      <td class="num hide-tablet">${fmt0(other)}</td>
-      <td class="num"><b>${fmt0(basic+hra+other)}</b></td>
       <td class="actions">
         <button class="btn ghost sm editEmpBtn">Edit</button>
-        <button class="btn ghost sm salStructBtn">Salary</button>
-        <button class="btn ghost sm onboardBtn">Onboarding</button>
         <button class="btn danger sm delEmpBtn">Delete</button>
       </td>
     </tr>`;}).join("");
   return `
   <div class="card">
     <h2>Employee Master</h2>
-    <div class="sub">Add, edit or remove employees. Emp ID must be unique.</div>
+    <div class="sub">Add, edit or remove employees. Emp ID must be unique. Click Edit for salary, KYC, bank, onboarding and documents.</div>
     <div class="row">
       <button class="btn ghost" id="downloadCsvTemplateBtn">Download CSV Template</button>
       <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importCsvInput" accept=".csv" style="display:none;"></label>
@@ -1630,8 +1634,8 @@ function renderEmployees(){
     ${selectedEmployeeIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedEmployeeIds.size} selected</span><button class="btn danger sm" id="bulkDeleteEmpBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th class="hide-tablet">Designation</th><th>DOJ</th><th class="hide-tablet">DOB</th><th>Email</th><th class="hide-tablet">Resigned</th><th>Status</th><th class="hide-tablet">Basic</th><th class="hide-tablet">HRA</th><th class="hide-tablet">Other</th><th>Gross</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="13" class="empty">No employees match.</td></tr>`}</tbody>
+        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th>Designation</th><th class="hide-tablet">Department</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No employees match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("employees", page, totalPages, total)}
@@ -1639,49 +1643,63 @@ function renderEmployees(){
   <div class="card">
     <h2 id="empFormTitle">Add Employee</h2>
     <input type="hidden" id="empEditingId" value="">
-    <div class="grid grid-4">
-      <div class="field"><label>Emp ID</label><input id="f_id" placeholder="${nextEmpId()}" value="${nextEmpId()}"></div>
-      <div class="field"><label>Name</label><input id="f_name" placeholder="Full name"></div>
-      <div class="field"><label>Designation</label><input id="f_designation" placeholder="e.g. Executive"></div>
-      <div class="field"><label>Department</label><input id="f_department" placeholder="e.g. Operations"></div>
-      <div class="field"><label>Date of Joining</label><input type="date" id="f_doj"></div>
-      <div class="field"><label>Date of Birth</label><input type="date" id="f_dob"></div>
-      <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
-      <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
-      <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
-      <div class="field"><label>Work From Home</label><select id="f_remote"><option value="">Office (GPS required)</option><option value="1">Remote-eligible (skips office GPS check)</option></select></div>
-      <div class="field"><label>Payslip Signature</label><select id="f_signature"><option value="">Default (follow company setting)</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>
+    <div class="form-tabs">
+      <button type="button" class="form-tab-btn active" data-tab="overview">Overview</button>
+      <button type="button" class="form-tab-btn" data-tab="personal">Personal</button>
+      <button type="button" class="form-tab-btn" data-tab="employment">Employment</button>
+      <button type="button" class="form-tab-btn" data-tab="bank">Bank Details</button>
     </div>
-    <p class="helptext" id="salaryFieldsNote" style="display:none;">Salary is managed in the Salary Structure panel below - click "Salary" on this employee's row.</p>
-    <div class="grid grid-4" id="salaryFieldsGroup">
-      <div class="field"><label>Starting Basic (₹)</label><input type="number" id="f_basic" value="0"></div>
-      <div class="field"><label>Starting HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
-      <div class="field"><label>Starting Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
+    <div class="empFormTabPane" id="empTab_overview">
+      <div class="grid grid-4">
+        <div class="field"><label>Emp ID</label><input id="f_id" placeholder="${nextEmpId()}" value="${nextEmpId()}"></div>
+        <div class="field"><label>Name</label><input id="f_name" placeholder="Full name"></div>
+        <div class="field"><label>Designation</label><input id="f_designation" placeholder="e.g. Executive"></div>
+        <div class="field"><label>Department</label><input id="f_department" placeholder="e.g. Operations"></div>
+        <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
+        <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
+      </div>
     </div>
-    <div class="section-title">Additional Details</div>
-    ${!canSeeSensitiveEmpData() ? `<p class="helptext">PAN, Aadhar and Bank A/c No. are masked and locked for your role - only Director/Admin can view or change an existing value. Blank fields can still be filled in.</p>` : ''}
-    <div class="grid grid-4">
-      <div class="field"><label>PAN</label><input id="f_pan"></div>
-      <div class="field"><label>Aadhar</label><input id="f_aadhar"></div>
-      <div class="field" style="grid-column:span 2;"><label>Address</label><input id="f_address"></div>
-      <div class="field"><label>Emergency Contact Name</label><input id="f_emergencyName"></div>
-      <div class="field"><label>Emergency Contact Phone</label><input id="f_emergencyPhone"></div>
+    <div class="empFormTabPane" id="empTab_personal" style="display:none;">
+      ${!canSeeSensitiveEmpData() ? `<p class="helptext">PAN, Aadhar and Bank A/c No. are masked and locked for your role - only Director/Admin can view or change an existing value. Blank fields can still be filled in.</p>` : ''}
+      <div class="grid grid-4">
+        <div class="field"><label>Date of Birth</label><input type="date" id="f_dob"></div>
+        <div class="field"><label>PAN</label><input id="f_pan"></div>
+        <div class="field"><label>Aadhar</label><input id="f_aadhar"></div>
+        <div class="field"><label>Address</label><input id="f_address"></div>
+        <div class="field"><label>Emergency Contact Name</label><input id="f_emergencyName"></div>
+        <div class="field"><label>Emergency Contact Phone</label><input id="f_emergencyPhone"></div>
+      </div>
     </div>
-    <div class="section-title">Bank Details (for payroll)</div>
-    <div class="grid grid-4">
-      <div class="field"><label>A/c Holder's Name</label><input id="f_bankHolder"></div>
-      <div class="field"><label>A/c No.</label><input id="f_bankAccNo"></div>
-      <div class="field"><label>IFSC</label><input id="f_ifsc"></div>
-      <div class="field"><label>Bank Name</label><input id="f_bankName"></div>
+    <div class="empFormTabPane" id="empTab_employment" style="display:none;">
+      <div class="grid grid-4">
+        <div class="field"><label>Date of Joining</label><input type="date" id="f_doj"></div>
+        <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
+        <div class="field"><label>Work From Home</label><select id="f_remote"><option value="">Office (GPS required)</option><option value="1">Remote-eligible (skips office GPS check)</option></select></div>
+        <div class="field"><label>Payslip Signature</label><select id="f_signature"><option value="">Default (follow company setting)</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>
+      </div>
+      <p class="helptext" id="salaryFieldsNote" style="display:none;">Salary is managed in the Salary Structure panel below.</p>
+      <div class="grid grid-4" id="salaryFieldsGroup">
+        <div class="field"><label>Starting Basic (₹)</label><input type="number" id="f_basic" value="0"></div>
+        <div class="field"><label>Starting HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
+        <div class="field"><label>Starting Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
+      </div>
+    </div>
+    <div class="empFormTabPane" id="empTab_bank" style="display:none;">
+      <div class="grid grid-4">
+        <div class="field"><label>A/c Holder's Name</label><input id="f_bankHolder"></div>
+        <div class="field"><label>A/c No.</label><input id="f_bankAccNo"></div>
+        <div class="field"><label>IFSC</label><input id="f_ifsc"></div>
+        <div class="field"><label>Bank Name</label><input id="f_bankName"></div>
+      </div>
     </div>
     <div class="row">
       <button class="btn gold" id="saveEmpBtn">Save Employee</button>
       <button class="btn ghost" id="cancelEmpBtn" style="display:none;">Cancel Edit</button>
     </div>
   </div>
-  ${renderSalaryStructureCard()}
-  ${renderOnboardingCard()}
-  ${renderOfferLetterCard()}`;
+  <details class="collapse-card"><summary>Salary Structure<span class="sub">Current pay, revision history and bonus plan assignment.</span></summary><div class="collapse-body">${renderSalaryStructureCard()}</div></details>
+  <details class="collapse-card"><summary>Onboarding Checklists<span class="sub">Per-employee onboarding progress tracking.</span></summary><div class="collapse-body">${renderOnboardingCard()}</div></details>
+  <details class="collapse-card"><summary>Offer, Appointment &amp; Relieving Letters<span class="sub">Generate and email HR documents.</span></summary><div class="collapse-body">${renderOfferLetterCard()}</div></details>`;
 }
 
 // ============================= SALARY STRUCTURE =============================
@@ -5340,6 +5358,13 @@ function attachHandlers(){
       document.getElementById("f_bankName").value = d.bankName||"";
       document.getElementById("cancelEmpBtn").style.display = "inline-block";
       window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"});
+    });
+    document.querySelectorAll(".form-tab-btn").forEach(b=>b.onclick=()=>{
+      document.querySelectorAll(".form-tab-btn").forEach(x=>x.classList.remove("active"));
+      b.classList.add("active");
+      document.querySelectorAll(".empFormTabPane").forEach(p=>p.style.display="none");
+      const pane = document.getElementById("empTab_"+b.dataset.tab);
+      if(pane) pane.style.display="";
     });
     document.querySelectorAll(".salStructBtn").forEach(b=>b.onclick=(e)=>{
       const id = e.target.closest("tr").dataset.id;
