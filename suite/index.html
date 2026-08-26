@@ -42,6 +42,15 @@
   nav.tabs button{background:transparent;border:none;color:#cfd7e3;padding:12px 14px;font-size:13.5px;cursor:pointer;white-space:nowrap;border-bottom:3px solid transparent;}
   nav.tabs button.active{color:#fff;border-bottom-color:var(--gold);font-weight:600;}
   nav.tabs button:hover{color:#fff;}
+  .shortcuts-overlay{display:none;position:fixed;inset:0;background:rgba(20,25,50,.4);z-index:200;}
+  .shortcuts-overlay.open{display:block;}
+  .shortcuts-panel{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--card);border-radius:12px;padding:20px 24px;z-index:201;width:min(520px,90vw);max-height:80vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+  .shortcuts-panel.open{display:block;}
+  .shortcuts-panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .shortcuts-table{width:100%;border-collapse:collapse;margin-bottom:6px;}
+  .shortcuts-table td{padding:6px 4px;border-bottom:1px solid var(--line);font-size:13px;}
+  .shortcuts-table td:first-child{white-space:nowrap;width:1%;}
+  kbd{display:inline-block;background:#F0F2F6;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 6px;font-family:inherit;font-size:11.5px;color:var(--navy);font-weight:600;}
   main{padding:18px;max-width:1300px;margin:0 auto;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(20,25,50,.04);}
   .card h2{margin:0 0 4px;font-size:16px;}
@@ -215,11 +224,41 @@
     <label style="color:#cfd7e3;margin:0;">Viewing as</label>
     <select id="roleSelect"></select>
     <select id="empScopeSelect" style="display:none;"></select>
+    <button class="btn ghost sm" id="shortcutsBtn" style="border-color:#cfd7e3;color:#cfd7e3;" title="Keyboard shortcuts (F1)">⌨ Shortcuts</button>
     <button class="btn ghost sm" id="logoutBtn" style="border-color:#cfd7e3;color:#cfd7e3;">Log Out</button>
   </div>
 </header>
 
 <nav class="tabs" id="tabs"></nav>
+
+<div class="shortcuts-overlay" id="shortcutsOverlay"></div>
+<div class="shortcuts-panel" id="shortcutsPanel">
+  <div class="shortcuts-panel-head">
+    <h2 style="margin:0;">Keyboard Shortcuts</h2>
+    <button class="btn ghost sm" id="closeShortcutsBtn">Close (Esc)</button>
+  </div>
+  <div class="section-title">Anywhere</div>
+  <table class="shortcuts-table">
+    <tr><td><kbd>F1</kbd></td><td>Show/hide this panel</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Close this panel / clear focus</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Save - clicks the primary Save/Add button on the current screen</td></tr>
+  </table>
+  <div class="section-title">Books - New Voucher (when on the Vouchers view)</div>
+  <table class="shortcuts-table">
+    <tr><td><kbd>F4</kbd></td><td>Contra</td></tr>
+    <tr><td><kbd>F5</kbd></td><td>Payment</td></tr>
+    <tr><td><kbd>F6</kbd></td><td>Receipt</td></tr>
+    <tr><td><kbd>F7</kbd></td><td>Journal</td></tr>
+    <tr><td><kbd>F8</kbd></td><td>Sales</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F8</kbd></td><td>Credit Note</td></tr>
+    <tr><td><kbd>F9</kbd></td><td>Purchase</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F9</kbd></td><td>Debit Note</td></tr>
+  </table>
+  <div class="section-title">Create New (jumps straight to the add form - no scrolling)</div>
+  <table class="shortcuts-table">
+    <tr><td><kbd>Alt</kbd>+<kbd>C</kbd></td><td>New Employee / New Ledger Account / New Stock Item / New Lead - whichever screen you're on</td></tr>
+  </table>
+</div>
 
 <main id="main"></main>
 </div>
@@ -7207,6 +7246,83 @@ async function emailPayslip(){
   }
 }
 
+// ============================= KEYBOARD SHORTCUTS (Tally-style) =============================
+let shortcutsPanelOpen = false;
+function toggleShortcutsPanel(open){
+  shortcutsPanelOpen = open==null ? !shortcutsPanelOpen : open;
+  const panel = document.getElementById("shortcutsPanel");
+  const overlay = document.getElementById("shortcutsOverlay");
+  if(panel) panel.classList.toggle("open", shortcutsPanelOpen);
+  if(overlay) overlay.classList.toggle("open", shortcutsPanelOpen);
+}
+
+function selectVoucherType(type){
+  if(activeTab!=="Books") return;
+  voucherType = type;
+  resetVoucherFormState();
+  renderAll();
+}
+
+function focusField(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.scrollIntoView({behavior:"smooth", block:"center"});
+  setTimeout(()=>el.focus(), 250);
+}
+
+// Maps the screen currently on-screen to the field that should get focus for
+// "Create New" (Alt+C) - the whole point being: never scroll to find the add
+// form again. Keyed by activeTab, with Books further split by booksView.
+function createNewFocusTarget(){
+  if(activeTab==="Employees") return "f_name";
+  if(activeTab==="CRM") return "ld_name";
+  if(activeTab==="Books"){
+    if(booksView==="accounts") return "acc_name";
+    if(booksView==="items") return "item_name";
+  }
+  return null;
+}
+
+const VOUCHER_HOTKEYS = {F4:"Contra", F5:"Payment", F6:"Receipt", F7:"Journal", F8:"Sales", F9:"Purchase"};
+const VOUCHER_HOTKEYS_CTRL = {F8:"CreditNote", F9:"DebitNote"};
+
+function initGlobalShortcuts(){
+  if(window.__shortcutsInitialized) return;
+  window.__shortcutsInitialized = true;
+  document.addEventListener("keydown", (e)=>{
+    const appRoot = document.getElementById("appRoot");
+    if(!appRoot || appRoot.style.display==="none") return; // not logged in yet
+
+    if(e.key==="F1"){ e.preventDefault(); toggleShortcutsPanel(); return; }
+
+    if(e.key==="Escape"){
+      if(shortcutsPanelOpen){ toggleShortcutsPanel(false); return; }
+      if(document.activeElement) document.activeElement.blur();
+      return;
+    }
+
+    if(e.ctrlKey && e.key==="Enter"){
+      e.preventDefault();
+      // .gold is also used to highlight the *selected* nav/voucher-type button (not a save
+      // action) - exclude those so this always finds the actual primary Save/Add button.
+      const btn = document.querySelector("#main .btn.gold:not(.booksNavBtn):not(.voucherTypeBtn)");
+      if(btn) btn.click();
+      return;
+    }
+
+    if(activeTab==="Books" && booksView==="vouchers" && !voucherEditingId){
+      if(!e.ctrlKey && VOUCHER_HOTKEYS[e.key]){ e.preventDefault(); selectVoucherType(VOUCHER_HOTKEYS[e.key]); return; }
+      if(e.ctrlKey && VOUCHER_HOTKEYS_CTRL[e.key]){ e.preventDefault(); selectVoucherType(VOUCHER_HOTKEYS_CTRL[e.key]); return; }
+    }
+
+    if(e.altKey && (e.key==="c" || e.key==="C")){
+      const target = createNewFocusTarget();
+      if(target){ e.preventDefault(); focusField(target); }
+      return;
+    }
+  });
+}
+
 // ============================= INIT =============================
 function setAuthMode(mode){
   const isSignup = mode === "signup";
@@ -7247,6 +7363,10 @@ async function startApp(){
   if(currentProfile.role === "Admin" || currentProfile.role === "Director"){ await loadTeam(); await loadAuditLog(); }
   if(currentProfile.role !== "Employee"){ await loadAccountingData(); }
   if(currentProfile.role === "Employee"){ await loadMyDevices(); }
+  initGlobalShortcuts();
+  document.getElementById("shortcutsBtn").onclick = ()=>toggleShortcutsPanel();
+  document.getElementById("closeShortcutsBtn").onclick = ()=>toggleShortcutsPanel(false);
+  document.getElementById("shortcutsOverlay").onclick = ()=>toggleShortcutsPanel(false);
   renderAll();
 }
 
