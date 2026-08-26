@@ -26,13 +26,34 @@
   .brand .brand-tag{font-size:10.5px;color:var(--navy);letter-spacing:1.5px;border-left:1px solid var(--line);padding-left:10px;margin-left:2px;}
   .role-switch{display:flex;align-items:center;gap:8px;color:#cfd7e3;font-size:12px;}
   .role-switch select{width:auto;padding:5px 8px;font-size:12px;}
-  nav.tabs{display:flex;gap:4px;overflow-x:auto;background:var(--navy-2);padding:0 12px;}
+  .tab-badge{display:inline-block;background:var(--danger);color:#fff;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:2px;}
+
+  /* ============ TOP NAV ============ */
+  header.topbar{background:linear-gradient(120deg,var(--navy),var(--navy-2));color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
+  .brand{display:flex;align-items:center;gap:10px;background:#fff;padding:6px 14px;border-radius:8px;}
+  .brand .mark-img{height:30px;width:auto;}
+  .brand .wordmark-img{height:18px;width:auto;margin-top:2px;}
+  .brand .brand-tag{font-size:10.5px;color:var(--navy);letter-spacing:1.5px;border-left:1px solid var(--line);padding-left:10px;margin-left:2px;}
+  .role-switch{display:flex;align-items:center;gap:8px;color:#cfd7e3;font-size:12px;flex-wrap:wrap;}
+  .role-switch select{width:auto;padding:5px 8px;font-size:12px;}
+  nav.tabs{display:flex;gap:2px;overflow-x:auto;background:var(--navy-2);padding:0 12px;flex-wrap:wrap;}
+  nav.tabs .nav-group{display:flex;align-items:center;}
+  nav.tabs .nav-group + .nav-group{border-left:1px solid rgba(255,255,255,.12);margin-left:6px;padding-left:6px;}
   nav.tabs button{background:transparent;border:none;color:#cfd7e3;padding:12px 14px;font-size:13.5px;cursor:pointer;white-space:nowrap;border-bottom:3px solid transparent;}
   nav.tabs button.active{color:#fff;border-bottom-color:var(--gold);font-weight:600;}
-  .tab-badge{display:inline-block;background:var(--danger);color:#fff;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:4px;vertical-align:2px;}
   nav.tabs button:hover{color:#fff;}
+  .shortcuts-overlay{display:none;position:fixed;inset:0;background:rgba(20,25,50,.4);z-index:200;}
+  .shortcuts-overlay.open{display:block;}
+  .shortcuts-panel{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--card);border-radius:12px;padding:20px 24px;z-index:201;width:min(520px,90vw);max-height:80vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+  .shortcuts-panel.open{display:block;}
+  .shortcuts-panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .shortcuts-table{width:100%;border-collapse:collapse;margin-bottom:6px;}
+  .shortcuts-table td{padding:6px 4px;border-bottom:1px solid var(--line);font-size:13px;}
+  .shortcuts-table td:first-child{white-space:nowrap;width:1%;}
+  kbd{display:inline-block;background:#F0F2F6;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 6px;font-family:inherit;font-size:11.5px;color:var(--navy);font-weight:600;}
+  .hotkey-tag{display:inline-block;opacity:.7;font-size:10px;font-weight:400;border:1px solid currentColor;border-radius:3px;padding:0 4px;vertical-align:1px;}
   main{padding:18px;max-width:1300px;margin:0 auto;}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(20,25,50,.04);}
   .card h2{margin:0 0 4px;font-size:16px;}
   .card .sub{color:var(--muted);font-size:12.5px;margin-bottom:12px;}
   .grid{display:grid;gap:12px;}
@@ -67,7 +88,8 @@
     background:linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,.06));
   }
   .table-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
-  .table-toolbar input[type="text"], .table-toolbar select{width:auto;min-width:160px;}
+  .table-toolbar select{width:auto;min-width:160px;flex:0 0 auto;}
+  .table-toolbar input[type="text"]{width:100%;}
   .table-toolbar .search-field{flex:1;min-width:180px;}
   .bulk-actions{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
   input[type="checkbox"]{width:auto;padding:0;}
@@ -75,7 +97,27 @@
   .app-footer a{color:var(--gold-light);text-decoration:none;}
   .app-footer a:hover{text-decoration:underline;}
   .app-footer-sub{font-size:11px;color:#8b98ad;margin-top:4px;}
-  .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(20,25,50,.04);}
+  .dash-header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:18px;}
+  .dash-header h1{font-size:20px;margin:0 0 4px;color:var(--navy);}
+  .dash-header .sub{color:var(--muted);font-size:13px;}
+  .quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;}
+  .dash-section-title{font-weight:700;color:var(--navy);font-size:12.5px;text-transform:uppercase;letter-spacing:.6px;margin:22px 0 10px;}
+  .dash-section-title:first-of-type{margin-top:0;}
+  .dash-note{color:var(--muted);font-size:12.5px;line-height:1.6;padding:12px 2px;border-top:1px solid var(--line);margin-top:8px;}
+  .form-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap;}
+  .form-tab-btn{background:transparent;border:none;color:var(--muted);padding:9px 4px;margin-right:16px;font-size:13px;cursor:pointer;font-weight:600;border-bottom:2px solid transparent;}
+  .form-tab-btn.active{color:var(--navy);border-bottom-color:var(--gold);}
+  .form-tab-btn:hover{color:var(--navy);}
+  details.collapse-card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;box-shadow:0 1px 2px rgba(20,25,50,.04);}
+  details.collapse-card > summary{list-style:none;cursor:pointer;padding:16px 18px;font-weight:700;color:var(--navy);font-size:15px;display:flex;align-items:center;justify-content:space-between;}
+  details.collapse-card > summary::-webkit-details-marker{display:none;}
+  details.collapse-card > summary::after{content:"+";font-size:18px;color:var(--muted);font-weight:400;}
+  details.collapse-card[open] > summary::after{content:"−";}
+  details.collapse-card > summary .sub{display:block;font-weight:400;color:var(--muted);font-size:12.5px;margin-top:3px;}
+  details.collapse-card > .collapse-body{padding:0 18px 18px;}
+  details.collapse-card > .collapse-body > .card{border:none;box-shadow:none;padding:0;margin:0;}
+  details.collapse-card > .collapse-body > .card > h2:first-child{display:none;}
   .stat .lbl{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
   .stat .val{font-size:22px;font-weight:700;color:var(--navy);margin-top:4px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
@@ -183,11 +225,41 @@
     <label style="color:#cfd7e3;margin:0;">Viewing as</label>
     <select id="roleSelect"></select>
     <select id="empScopeSelect" style="display:none;"></select>
+    <button class="btn ghost sm" id="shortcutsBtn" style="border-color:#cfd7e3;color:#cfd7e3;" title="Keyboard shortcuts (F1)">⌨ Shortcuts</button>
     <button class="btn ghost sm" id="logoutBtn" style="border-color:#cfd7e3;color:#cfd7e3;">Log Out</button>
   </div>
 </header>
 
 <nav class="tabs" id="tabs"></nav>
+
+<div class="shortcuts-overlay" id="shortcutsOverlay"></div>
+<div class="shortcuts-panel" id="shortcutsPanel">
+  <div class="shortcuts-panel-head">
+    <h2 style="margin:0;">Keyboard Shortcuts</h2>
+    <button class="btn ghost sm" id="closeShortcutsBtn">Close (Esc)</button>
+  </div>
+  <div class="section-title">Anywhere</div>
+  <table class="shortcuts-table">
+    <tr><td><kbd>F1</kbd></td><td>Show/hide this panel</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Close this panel / clear focus</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Save - clicks the primary Save/Add button on the current screen</td></tr>
+  </table>
+  <div class="section-title">Books - New Voucher (when on the Vouchers view)</div>
+  <table class="shortcuts-table">
+    <tr><td><kbd>F4</kbd></td><td>Contra</td></tr>
+    <tr><td><kbd>F5</kbd></td><td>Payment</td></tr>
+    <tr><td><kbd>F6</kbd></td><td>Receipt</td></tr>
+    <tr><td><kbd>F7</kbd></td><td>Journal</td></tr>
+    <tr><td><kbd>F8</kbd></td><td>Sales</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F8</kbd></td><td>Credit Note</td></tr>
+    <tr><td><kbd>F9</kbd></td><td>Purchase</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F9</kbd></td><td>Debit Note</td></tr>
+  </table>
+  <div class="section-title">Create New (jumps straight to the add form - no scrolling)</div>
+  <table class="shortcuts-table">
+    <tr><td><kbd>Alt</kbd>+<kbd>C</kbd></td><td>New Employee / New Ledger Account / New Stock Item / New Lead - whichever screen you're on</td></tr>
+  </table>
+</div>
 
 <main id="main"></main>
 </div>
@@ -248,6 +320,21 @@ const ROLE_TABS = {
   "Sales": ["Dashboard","CRM","Reports"],
   "Employee": ["Dashboard","Attendance","My Profile"]
 };
+
+// Purely a display/grouping layer over ROLE_TABS/TABS - every group lists real tab names,
+// unchanged from the flat list, so activeTab dispatch in renderAll() needs no changes here.
+// A group with no `label` renders as ungrouped top-level links (single-tab groups).
+const TAB_GROUPS = [
+  { label: null, tabs: ["Dashboard"] },
+  { label: "People", tabs: ["Employees","Team"] },
+  { label: "Payroll", tabs: ["Payroll","Payments","Payslip"] },
+  { label: "Attendance & Leave", tabs: ["Attendance","Leaves"] },
+  { label: null, tabs: ["Books"] },
+  { label: null, tabs: ["CRM"] },
+  { label: null, tabs: ["Reports"] },
+  { label: null, tabs: ["My Profile"] },
+  { label: null, tabs: ["Settings"] },
+];
 let currentRole = "Admin";
 let currentEmpId = null; // used to scope "Employee" role to one person
 let activeTab = "Dashboard";
@@ -872,9 +959,14 @@ function renderTabs(){
   const allowed = ROLE_TABS[currentRole] || TABS;
   if(!allowed.includes(activeTab)) activeTab = allowed[0];
   const nav = document.getElementById("tabs");
-  nav.innerHTML = allowed.map(t=>{
-    const count = tabBadgeCount(t);
-    return `<button data-tab="${t}" class="${t===activeTab?'active':''}">${t}${count>0?` <span class="tab-badge">${count}</span>`:''}</button>`;
+  nav.innerHTML = TAB_GROUPS.map(g=>{
+    const tabs = g.tabs.filter(t=>allowed.includes(t));
+    if(!tabs.length) return "";
+    const links = tabs.map(t=>{
+      const count = tabBadgeCount(t);
+      return `<button data-tab="${t}" class="${t===activeTab?'active':''}">${t}${count>0?` <span class="tab-badge">${count}</span>`:''}</button>`;
+    }).join("");
+    return `<span class="nav-group">${links}</span>`;
   }).join("");
   nav.querySelectorAll("button").forEach(b=>b.onclick=()=>{activeTab=b.dataset.tab; renderAll();});
 }
@@ -914,6 +1006,17 @@ function renderRoleSelector(){
       empScope.onchange = null;
     }
   }
+}
+
+function goToTab(t){ activeTab = t; renderAll(); window.scrollTo({top:0}); }
+function dashHeader(name){
+  const h = new Date().getHours();
+  const greeting = h<12 ? "Good morning" : h<17 ? "Good afternoon" : "Good evening";
+  const today = new Date().toLocaleDateString("en-IN", {weekday:"long", day:"numeric", month:"long", year:"numeric"});
+  return `<div class="dash-header"><div><h1>${greeting}${name?", "+escapeHtml(name):""}</h1><div class="sub">${today}</div></div></div>`;
+}
+function dashQuickActions(items){
+  return `<div class="quick-actions">${items.map(i=>`<button class="btn ghost sm" onclick="goToTab('${i.tab}')">${i.label}</button>`).join("")}</div>`;
 }
 
 function renderAll(){
@@ -990,12 +1093,8 @@ function renderDashboard(){
 
   const attendanceChart = todayAttendanceBreakdown();
 
-  const welcomeCard = `
-  <div class="card">
-    <h2>Welcome to Auzentis Business Suite</h2>
-    <div class="sub">Payroll, statutory ledger, accounting, attendance, leave management and a lightweight CRM - all in one place.</div>
-    <p class="helptext" style="margin-top:10px;">Note: the role switcher above reorganizes what each person sees in this app - it is not a secure login system (Admin/Director/HR/Accounts/Sales views all still see full company data by design). A real Employee login is properly restricted at both the UI and their own scope - see the Team tab.</p>
-  </div>`;
+  const welcomeNote = `<div class="dash-note">Payroll, statutory ledger, accounting, attendance, leave management and a lightweight CRM - all in one place. The role switcher above previews what each role sees here; it isn't a secure login system on its own - a real Employee login is properly restricted at both the UI and their own data scope (see the Team tab).</div>`;
+  const header = dashHeader(currentProfile ? currentProfile.name : "");
 
   if(currentRole === "Admin" || currentRole === "Director"){
     const lopRisk = DB.employees.filter(e=>e.status==="Active").map(e=>({emp:e, shortfall: computeMonthlyShortfall(e.id, now.getMonth()+1, now.getFullYear())}))
@@ -1003,6 +1102,9 @@ function renderDashboard(){
       .sort((a,b)=>b.shortfall-a.shortfall);
 
     return `
+    ${header}
+    ${dashQuickActions([{tab:"Employees",label:"+ Add Employee"},{tab:"Employees",label:"Generate Letter"},{tab:"Payroll",label:"Process Payroll"},{tab:"Leaves",label:"Review Leave"},{tab:"Reports",label:"Create Report"}])}
+    <div class="dash-section-title">Overview</div>
     <div class="grid grid-4">
       <div class="stat"><div class="lbl">Active Employees</div><div class="val">${activeCount}</div></div>
       <div class="stat"><div class="lbl">${latest?monthName(latest.month)+" "+latest.year+" Gross":"No payroll yet"}</div><div class="val">₹${fmt0(grossTotal)}</div></div>
@@ -1015,6 +1117,19 @@ function renderDashboard(){
       <div class="stat"><div class="lbl">Open Pipeline Value</div><div class="val">₹${fmt0(openLeadsValue)}</div></div>
       <div class="stat"><div class="lbl">Total Leads</div><div class="val">${DB.leads.length}</div></div>
     </div>
+    <div class="dash-section-title">Needs Attention</div>
+    <div class="card">
+      <h2>Attendance Shortfall Risk (LOP) - ${monthName(now.getMonth()+1)}</h2>
+      <div class="sub">Employees short ${ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS}h+ this month, based on hours worked so far.</div>
+      ${lopRisk.length ? `
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th class="num">Shortfall</th></tr></thead>
+          <tbody>${lopRisk.map(x=>`<tr><td>${x.emp.id}</td><td>${x.emp.name}</td><td class="num">${formatHours(x.shortfall)}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>` : `<div class="empty">No one is over the shortfall threshold right now.</div>`}
+    </div>
+    <div class="dash-section-title">Trends</div>
     <div class="grid grid-2">
       <div class="card">
         <h2>Today's Attendance</h2>
@@ -1025,30 +1140,23 @@ function renderDashboard(){
         ${svgBarChart(payrollTrend)}
       </div>
     </div>
-    <div class="grid grid-2">
-      <div class="card">
-        <h2>CRM Pipeline by Stage</h2>
-        ${svgBarChart(pipelineChart)}
-      </div>
-      <div class="card">
-        <h2>Attendance Shortfall Risk (LOP) - ${monthName(now.getMonth()+1)}</h2>
-        <div class="sub">Employees short ${ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS}h+ this month, based on hours worked so far.</div>
-        ${lopRisk.length ? `
-        <div class="tablewrap">
-          <table>
-            <thead><tr><th>ID</th><th>Name</th><th class="num">Shortfall</th></tr></thead>
-            <tbody>${lopRisk.map(x=>`<tr><td>${x.emp.id}</td><td>${x.emp.name}</td><td class="num">${formatHours(x.shortfall)}</td></tr>`).join("")}</tbody>
-          </table>
-        </div>` : `<div class="empty">No one is over the shortfall threshold right now.</div>`}
-      </div>
+    <div class="card">
+      <h2>CRM Pipeline by Stage</h2>
+      ${svgBarChart(pipelineChart)}
     </div>
-    ${renderUpcomingHolidaysCard()}
-    ${renderUpcomingBirthdaysCard()}
-    ${welcomeCard}`;
+    <div class="dash-section-title">Upcoming</div>
+    <div class="grid grid-2">
+      ${renderUpcomingHolidaysCard()}
+      ${renderUpcomingBirthdaysCard()}
+    </div>
+    ${welcomeNote}`;
   }
 
   if(currentRole === "HR"){
     return `
+    ${header}
+    ${dashQuickActions([{tab:"Employees",label:"+ Add Employee"},{tab:"Employees",label:"Generate Letter"},{tab:"Leaves",label:"Review Leave"},{tab:"Attendance",label:"Attendance"},{tab:"Reports",label:"Create Report"}])}
+    <div class="dash-section-title">Overview</div>
     <div class="grid grid-4">
       <div class="stat"><div class="lbl">Active Employees</div><div class="val">${activeCount}</div></div>
       <div class="stat"><div class="lbl">Inactive Employees</div><div class="val">${inactiveCount}</div></div>
@@ -1059,13 +1167,19 @@ function renderDashboard(){
       <h2>Today's Attendance</h2>
       ${svgBarChart(attendanceChart)}
     </div>
-    ${renderUpcomingHolidaysCard()}
-    ${renderUpcomingBirthdaysCard()}
-    ${welcomeCard}`;
+    <div class="dash-section-title">Upcoming</div>
+    <div class="grid grid-2">
+      ${renderUpcomingHolidaysCard()}
+      ${renderUpcomingBirthdaysCard()}
+    </div>
+    ${welcomeNote}`;
   }
 
   if(currentRole === "Accounts"){
     return `
+    ${header}
+    ${dashQuickActions([{tab:"Payroll",label:"Process Payroll"},{tab:"Books",label:"Open Books"},{tab:"Reports",label:"Create Report"}])}
+    <div class="dash-section-title">Overview</div>
     <div class="grid grid-4">
       <div class="stat"><div class="lbl">${latest?monthName(latest.month)+" "+latest.year+" Gross":"No payroll yet"}</div><div class="val">₹${fmt0(grossTotal)}</div></div>
       <div class="stat"><div class="lbl">${latest?"Net Payable":"-"}</div><div class="val">₹${fmt0(netTotal)}</div></div>
@@ -1076,15 +1190,21 @@ function renderDashboard(){
       <h2>Gross Payroll - Last ${payrollTrend.length} Period(s)</h2>
       ${svgBarChart(payrollTrend)}
     </div>
-    ${renderUpcomingHolidaysCard()}
-    ${renderUpcomingBirthdaysCard()}
-    ${welcomeCard}`;
+    <div class="dash-section-title">Upcoming</div>
+    <div class="grid grid-2">
+      ${renderUpcomingHolidaysCard()}
+      ${renderUpcomingBirthdaysCard()}
+    </div>
+    ${welcomeNote}`;
   }
 
   if(currentRole === "Sales"){
     const soon = new Date(); soon.setDate(soon.getDate()+7);
     const upcomingFollowUps = DB.leads.filter(l=>l.nextFollowUp && new Date(l.nextFollowUp)<=soon && !["Won","Lost"].includes(l.stage)).length;
     return `
+    ${header}
+    ${dashQuickActions([{tab:"CRM",label:"+ New Lead"},{tab:"Reports",label:"Create Report"}])}
+    <div class="dash-section-title">Overview</div>
     <div class="grid grid-4">
       <div class="stat"><div class="lbl">Open Pipeline Value</div><div class="val">₹${fmt0(openLeadsValue)}</div></div>
       <div class="stat"><div class="lbl">Total Leads</div><div class="val">${DB.leads.length}</div></div>
@@ -1095,21 +1215,29 @@ function renderDashboard(){
       <h2>CRM Pipeline by Stage</h2>
       ${svgBarChart(pipelineChart)}
     </div>
-    ${renderUpcomingHolidaysCard()}
-    ${renderUpcomingBirthdaysCard()}
-    ${welcomeCard}`;
+    <div class="dash-section-title">Upcoming</div>
+    <div class="grid grid-2">
+      ${renderUpcomingHolidaysCard()}
+      ${renderUpcomingBirthdaysCard()}
+    </div>
+    ${welcomeNote}`;
   }
 
   return `
+  ${header}
+  <div class="dash-section-title">Overview</div>
   <div class="grid grid-4">
     <div class="stat"><div class="lbl">Active Employees</div><div class="val">${activeCount}</div></div>
     <div class="stat"><div class="lbl">${latest?monthName(latest.month)+" "+latest.year+" Gross":"No payroll yet"}</div><div class="val">₹${fmt0(grossTotal)}</div></div>
     <div class="stat"><div class="lbl">${latest?"Net Payable":"-"}</div><div class="val">₹${fmt0(netTotal)}</div></div>
     <div class="stat"><div class="lbl">${latest?"Employer Cost":"-"}</div><div class="val">₹${fmt0(costTotal)}</div></div>
   </div>
-  ${renderUpcomingHolidaysCard()}
-  ${renderUpcomingBirthdaysCard()}
-  ${welcomeCard}`;
+  <div class="dash-section-title">Upcoming</div>
+  <div class="grid grid-2">
+    ${renderUpcomingHolidaysCard()}
+    ${renderUpcomingBirthdaysCard()}
+  </div>
+  ${welcomeNote}`;
 }
 
 function renderMyDashboard(){
@@ -1123,11 +1251,14 @@ function renderMyDashboard(){
   const shortfall = currentEmpId ? computeMonthlyShortfall(currentEmpId, now.getMonth()+1, now.getFullYear()) : 0;
 
   return `
+  ${dashHeader(emp ? emp.name : "")}
+  ${dashQuickActions([{tab:"Attendance",label:"Punch In / Out"},{tab:"My Profile",label:"My Profile"}])}
   ${emp && isBirthdayToday(emp) ? `
   <div class="card" style="background:var(--navy);color:#fff;text-align:center;">
     <h2 style="color:#fff;">🎉 Happy Birthday, ${escapeHtml(emp.name)}! 🎉</h2>
     <div class="sub" style="color:#fff;opacity:0.85;">Wishing you a great year ahead, from everyone at Auzentis.</div>
   </div>` : ''}
+  <div class="dash-section-title">Overview</div>
   <div class="grid grid-2">
     <div class="stat"><div class="lbl">Today's Attendance</div><div class="val">${status}</div></div>
     <div class="stat"><div class="lbl">Welcome</div><div class="val">${emp ? emp.name : "-"}</div></div>
@@ -1139,12 +1270,12 @@ function renderMyDashboard(){
       You're short by <b>${formatHours(shortfall)}</b> this month${shortfall>=ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS?' - this may result in a Loss-of-Pay deduction unless made up before month end.':'. Try to make it up in the remaining working days.'}
     </p>
   </div>` : ''}
-  ${renderUpcomingHolidaysCard()}
-  ${renderUpcomingBirthdaysCard()}
-  <div class="card">
-    <h2>Welcome to Auzentis</h2>
-    <div class="sub">Use the Attendance tab to punch in when you start work and punch out when you finish.</div>
-  </div>`;
+  <div class="dash-section-title">Upcoming</div>
+  <div class="grid grid-2">
+    ${renderUpcomingHolidaysCard()}
+    ${renderUpcomingBirthdaysCard()}
+  </div>
+  <div class="dash-note">Use the Attendance tab to punch in when you start work and punch out when you finish.</div>`;
 }
 
 // ============================= SETTINGS =============================
@@ -1466,28 +1597,19 @@ function renderEmployees(){
       <td><input type="checkbox" class="rowCheck empCheck" data-id="${e.id}" ${selectedEmployeeIds.has(e.id)?'checked':''}></td>
       <td>${e.id}</td>
       <td>${e.name}</td>
-      <td class="hide-tablet">${(e.details&&e.details.designation)||'-'}</td>
-      <td>${e.doj}</td>
-      <td class="hide-tablet">${e.dob||'-'}</td>
-      <td>${e.email||'-'}</td>
-      <td class="hide-tablet">${e.resignDate||'-'}</td>
+      <td>${(e.details&&e.details.designation)||'-'}</td>
+      <td class="hide-tablet">${(e.details&&e.details.department)||'-'}</td>
       <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span>${e.isRemote?' <span class="pill ok">WFH</span>':''}
         ${ob.total ? `<span class="pill ${ob.complete?'ok':'warn'}" title="Onboarding checklist">${ob.done}/${ob.total}</span>` : ''}</td>
-      <td class="num hide-tablet">${fmt0(basic)}</td>
-      <td class="num hide-tablet">${fmt0(hra)}</td>
-      <td class="num hide-tablet">${fmt0(other)}</td>
-      <td class="num"><b>${fmt0(basic+hra+other)}</b></td>
       <td class="actions">
         <button class="btn ghost sm editEmpBtn">Edit</button>
-        <button class="btn ghost sm salStructBtn">Salary</button>
-        <button class="btn ghost sm onboardBtn">Onboarding</button>
         <button class="btn danger sm delEmpBtn">Delete</button>
       </td>
     </tr>`;}).join("");
   return `
   <div class="card">
     <h2>Employee Master</h2>
-    <div class="sub">Add, edit or remove employees. Emp ID must be unique.</div>
+    <div class="sub">Add, edit or remove employees. Emp ID must be unique. Click Edit for salary, KYC, bank, onboarding and documents.</div>
     <div class="row">
       <button class="btn ghost" id="downloadCsvTemplateBtn">Download CSV Template</button>
       <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importCsvInput" accept=".csv" style="display:none;"></label>
@@ -1503,58 +1625,72 @@ function renderEmployees(){
     ${selectedEmployeeIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedEmployeeIds.size} selected</span><button class="btn danger sm" id="bulkDeleteEmpBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th class="hide-tablet">Designation</th><th>DOJ</th><th class="hide-tablet">DOB</th><th>Email</th><th class="hide-tablet">Resigned</th><th>Status</th><th class="hide-tablet">Basic</th><th class="hide-tablet">HRA</th><th class="hide-tablet">Other</th><th>Gross</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="13" class="empty">No employees match.</td></tr>`}</tbody>
+        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th>Designation</th><th class="hide-tablet">Department</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No employees match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("employees", page, totalPages, total)}
   </div>
   <div class="card">
-    <h2 id="empFormTitle">Add Employee</h2>
+    <h2 id="empFormTitle">Add Employee <span class="hotkey-tag">Alt+C</span></h2>
     <input type="hidden" id="empEditingId" value="">
-    <div class="grid grid-4">
-      <div class="field"><label>Emp ID</label><input id="f_id" placeholder="${nextEmpId()}" value="${nextEmpId()}"></div>
-      <div class="field"><label>Name</label><input id="f_name" placeholder="Full name"></div>
-      <div class="field"><label>Designation</label><input id="f_designation" placeholder="e.g. Executive"></div>
-      <div class="field"><label>Department</label><input id="f_department" placeholder="e.g. Operations"></div>
-      <div class="field"><label>Date of Joining</label><input type="date" id="f_doj"></div>
-      <div class="field"><label>Date of Birth</label><input type="date" id="f_dob"></div>
-      <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
-      <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
-      <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
-      <div class="field"><label>Work From Home</label><select id="f_remote"><option value="">Office (GPS required)</option><option value="1">Remote-eligible (skips office GPS check)</option></select></div>
-      <div class="field"><label>Payslip Signature</label><select id="f_signature"><option value="">Default (follow company setting)</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>
+    <div class="form-tabs">
+      <button type="button" class="form-tab-btn active" data-tab="overview">Overview</button>
+      <button type="button" class="form-tab-btn" data-tab="personal">Personal</button>
+      <button type="button" class="form-tab-btn" data-tab="employment">Employment</button>
+      <button type="button" class="form-tab-btn" data-tab="bank">Bank Details</button>
     </div>
-    <p class="helptext" id="salaryFieldsNote" style="display:none;">Salary is managed in the Salary Structure panel below - click "Salary" on this employee's row.</p>
-    <div class="grid grid-4" id="salaryFieldsGroup">
-      <div class="field"><label>Starting Basic (₹)</label><input type="number" id="f_basic" value="0"></div>
-      <div class="field"><label>Starting HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
-      <div class="field"><label>Starting Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
+    <div class="empFormTabPane" id="empTab_overview">
+      <div class="grid grid-4">
+        <div class="field"><label>Emp ID</label><input id="f_id" placeholder="${nextEmpId()}" value="${nextEmpId()}"></div>
+        <div class="field"><label>Name</label><input id="f_name" placeholder="Full name"></div>
+        <div class="field"><label>Designation</label><input id="f_designation" placeholder="e.g. Executive"></div>
+        <div class="field"><label>Department</label><input id="f_department" placeholder="e.g. Operations"></div>
+        <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
+        <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
+      </div>
     </div>
-    <div class="section-title">Additional Details</div>
-    ${!canSeeSensitiveEmpData() ? `<p class="helptext">PAN, Aadhar and Bank A/c No. are masked and locked for your role - only Director/Admin can view or change an existing value. Blank fields can still be filled in.</p>` : ''}
-    <div class="grid grid-4">
-      <div class="field"><label>PAN</label><input id="f_pan"></div>
-      <div class="field"><label>Aadhar</label><input id="f_aadhar"></div>
-      <div class="field" style="grid-column:span 2;"><label>Address</label><input id="f_address"></div>
-      <div class="field"><label>Emergency Contact Name</label><input id="f_emergencyName"></div>
-      <div class="field"><label>Emergency Contact Phone</label><input id="f_emergencyPhone"></div>
+    <div class="empFormTabPane" id="empTab_personal" style="display:none;">
+      ${!canSeeSensitiveEmpData() ? `<p class="helptext">PAN, Aadhar and Bank A/c No. are masked and locked for your role - only Director/Admin can view or change an existing value. Blank fields can still be filled in.</p>` : ''}
+      <div class="grid grid-4">
+        <div class="field"><label>Date of Birth</label><input type="date" id="f_dob"></div>
+        <div class="field"><label>PAN</label><input id="f_pan"></div>
+        <div class="field"><label>Aadhar</label><input id="f_aadhar"></div>
+        <div class="field"><label>Address</label><input id="f_address"></div>
+        <div class="field"><label>Emergency Contact Name</label><input id="f_emergencyName"></div>
+        <div class="field"><label>Emergency Contact Phone</label><input id="f_emergencyPhone"></div>
+      </div>
     </div>
-    <div class="section-title">Bank Details (for payroll)</div>
-    <div class="grid grid-4">
-      <div class="field"><label>A/c Holder's Name</label><input id="f_bankHolder"></div>
-      <div class="field"><label>A/c No.</label><input id="f_bankAccNo"></div>
-      <div class="field"><label>IFSC</label><input id="f_ifsc"></div>
-      <div class="field"><label>Bank Name</label><input id="f_bankName"></div>
+    <div class="empFormTabPane" id="empTab_employment" style="display:none;">
+      <div class="grid grid-4">
+        <div class="field"><label>Date of Joining</label><input type="date" id="f_doj"></div>
+        <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
+        <div class="field"><label>Work From Home</label><select id="f_remote"><option value="">Office (GPS required)</option><option value="1">Remote-eligible (skips office GPS check)</option></select></div>
+        <div class="field"><label>Payslip Signature</label><select id="f_signature"><option value="">Default (follow company setting)</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>
+      </div>
+      <p class="helptext" id="salaryFieldsNote" style="display:none;">Salary is managed in the Salary Structure panel below.</p>
+      <div class="grid grid-4" id="salaryFieldsGroup">
+        <div class="field"><label>Starting Basic (₹)</label><input type="number" id="f_basic" value="0"></div>
+        <div class="field"><label>Starting HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
+        <div class="field"><label>Starting Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
+      </div>
+    </div>
+    <div class="empFormTabPane" id="empTab_bank" style="display:none;">
+      <div class="grid grid-4">
+        <div class="field"><label>A/c Holder's Name</label><input id="f_bankHolder"></div>
+        <div class="field"><label>A/c No.</label><input id="f_bankAccNo"></div>
+        <div class="field"><label>IFSC</label><input id="f_ifsc"></div>
+        <div class="field"><label>Bank Name</label><input id="f_bankName"></div>
+      </div>
     </div>
     <div class="row">
       <button class="btn gold" id="saveEmpBtn">Save Employee</button>
       <button class="btn ghost" id="cancelEmpBtn" style="display:none;">Cancel Edit</button>
     </div>
   </div>
-  ${renderSalaryStructureCard()}
-  ${renderOnboardingCard()}
-  ${renderOfferLetterCard()}`;
+  <details class="collapse-card" id="salaryDetailsCard" ${empSalaryDetailsOpen?'open':''}><summary>Salary Structure<span class="sub">Current pay, revision history and bonus plan assignment.</span></summary><div class="collapse-body">${renderSalaryStructureCard()}</div></details>
+  <details class="collapse-card" id="onboardDetailsCard" ${empOnboardDetailsOpen?'open':''}><summary>Onboarding Checklists<span class="sub">Per-employee onboarding progress tracking.</span></summary><div class="collapse-body">${renderOnboardingCard()}</div></details>
+  <details class="collapse-card" id="letterDetailsCard" ${empLetterDetailsOpen?'open':''}><summary>Offer, Appointment &amp; Relieving Letters<span class="sub">Generate and email HR documents.</span></summary><div class="collapse-body">${renderOfferLetterCard()}</div></details>`;
 }
 
 // ============================= SALARY STRUCTURE =============================
@@ -1562,6 +1698,9 @@ function renderEmployees(){
 // effective from a chosen month (never earlier than the current month, so
 // past payroll and payslips can never change). computePayroll() always looks
 // up whichever structure was actually in force for the period being paid.
+let empSalaryDetailsOpen = false;
+let empOnboardDetailsOpen = false;
+let empLetterDetailsOpen = false;
 let salStructEmpId = null;
 let salStructDraftBasic = 0;
 let salStructDraftHra = 0;
@@ -1876,6 +2015,16 @@ function renderPayroll(){
     }
     return entry;
   });
+  // Live shortfall as of right now, for every employee - even one whose payroll row
+  // was already saved earlier in the month. Attendance recorded after that save (e.g.
+  // an absence today) never retroactively rewrites a saved lopHours value on its own -
+  // this surfaces the up-to-date suggestion next to the field so it's never silently
+  // missed, with a one-click way to pull it in before saving.
+  const liveSuggested = {};
+  activeEmployees.forEach(emp=>{
+    const shortfall = computeMonthlyShortfall(emp.id, payrollPeriod.month, payrollPeriod.year);
+    liveSuggested[emp.id] = shortfall >= ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS ? Math.round(shortfall*100)/100 : 0;
+  });
   const results = entries.map(computePayroll).filter(Boolean);
   const totals = results.reduce((a,r)=>({gross:a.gross+r.gross,net:a.net+r.netPay,ded:a.ded+r.totalDed}),{gross:0,net:0,ded:0});
 
@@ -1889,7 +2038,10 @@ function renderPayroll(){
       <td class="num">${r.totalDays}</td>
       <td class="num">${r.avail}</td>
       <td class="num"><input type="number" min="0" class="badge-input leavesInput" value="${entry.leaves}" data-emp="${r.emp.id}"></td>
-      <td class="num"><input type="number" min="0" step="0.25" class="badge-input lopInput" value="${entry.lopHours||0}" data-emp="${r.emp.id}" title="Auto-suggested from attendance shortfall - editable"></td>
+      <td class="num">
+        <input type="number" min="0" step="0.25" class="badge-input lopInput" value="${entry.lopHours||0}" data-emp="${r.emp.id}" title="Auto-suggested from attendance shortfall - editable">
+        ${Math.abs((liveSuggested[r.emp.id]||0) - (entry.lopHours||0)) >= 0.25 ? `<div class="helptext" style="white-space:nowrap;">Current attendance suggests ${liveSuggested[r.emp.id]}h - <button type="button" class="btn ghost sm useLopBtn" data-emp="${r.emp.id}" data-hours="${liveSuggested[r.emp.id]}" style="padding:1px 8px;font-size:11px;">Use this</button></div>` : ''}
+      </td>
       <td class="num"><input type="number" min="0" max="100" step="0.1" class="badge-input qualityInput" value="${entry.quality==null?'':entry.quality}" data-emp="${r.emp.id}" placeholder="-" title="Quality % for this month, used by Quality bonus rules"></td>
       <td class="num"><input type="number" min="0" class="badge-input unitsInput" value="${entry.units==null?'':entry.units}" data-emp="${r.emp.id}" placeholder="-" title="Approved Units for this month, used by Production bonus rules"></td>
       <td class="num">${round2(r.payable)}</td>
@@ -2075,6 +2227,7 @@ const VOUCHER_TYPE_HELP = {
   DeliveryNote: "Records goods sent to a customer ahead of invoicing (e.g. dispatch before billing) - no ledger impact. \"Convert to Invoice\" to bill it.",
   ReceiptNote: "Records goods received from a vendor ahead of their invoice - no ledger impact. \"Convert to Invoice\" once billed."
 };
+const VOUCHER_TYPE_HOTKEY = {Contra:"F4", Payment:"F5", Receipt:"F6", Journal:"F7", Sales:"F8", CreditNote:"Ctrl+F8", Purchase:"F9", DebitNote:"Ctrl+F9"};
 
 function normalSign(nature){ return (nature==="Asset"||nature==="Expense") ? 1 : -1; }
 function accName(id){ const a = DB.ledgerAccounts.find(x=>x.id===id); return a ? a.name : id; }
@@ -2531,6 +2684,8 @@ let booksView = "vouchers";
 let voucherType = "Sales";
 let journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
 let booksDayRange = null;
+let booksDayBookOpen = false;
+let booksCsvImportOpen = false;
 let booksAsOf = null;
 let booksPnlRange = null;
 let booksPartyId = null;
@@ -2608,7 +2763,9 @@ function renderBooks(){
 // ---- Stock Items (item master for item-wise invoicing - no stock-on-hand/valuation tracking) ----
 let itemEditingId = null;
 function renderStockItems(){
-  const rows = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>{
+  const sorted = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const { pageItems, page, totalPages, total } = paginate(sorted, "stockItems", 20);
+  const rows = pageItems.map(i=>{
     const stk = itemStockPosition(i.id);
     return `
     <tr data-id="${i.id}">
@@ -2631,7 +2788,8 @@ function renderStockItems(){
         <tbody>${rows || `<tr><td colspan="7" class="empty">No items yet.</td></tr>`}</tbody>
       </table>
     </div>
-    <div class="section-title">${editing ? `Edit Item - ${escapeHtml(editing.name)}` : 'Add Item'}</div>
+    ${renderPager("stockItems", page, totalPages, total)}
+    <div class="section-title">${editing ? `Edit Item - ${escapeHtml(editing.name)}` : `Add Item <span class="hotkey-tag">Alt+C</span>`}</div>
     <input type="hidden" id="itemEditingId" value="${itemEditingId||''}">
     <div class="grid grid-4">
       <div class="field"><label>Name</label><input id="item_name" placeholder="e.g. Vextron SS10X" value="${editing?escapeHtml(editing.name):''}"></div>
@@ -2652,9 +2810,12 @@ function renderStockItems(){
 
 // ---- Chart of Accounts ----
 let accEditingId = null;
+let accFormDetailsOpen = false;
 let openingBillsDraft = []; // [{id,date,reference,amount}] - draft for the Opening Bills section, synced from the account being edited by editAccBtn
 function renderChartOfAccounts(){
-  const rows = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name)).map(a=>`
+  const sorted = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name));
+  const { pageItems, page, totalPages, total } = paginate(sorted, "chartOfAccounts", 20);
+  const rows = pageItems.map(a=>`
     <tr data-id="${a.id}">
       <td>${a.name}</td><td>${a.accGroup}</td><td>${a.nature}</td>
       <td>${a.isParty ? (a.partyType||'Party') : ''}</td>
@@ -2675,10 +2836,14 @@ function renderChartOfAccounts(){
     <div class="tablewrap">
       <table>
         <thead><tr><th>Name</th><th>Group</th><th>Nature</th><th>Party Type</th><th>Current Balance</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No accounts yet.</td></tr>`}</tbody>
       </table>
     </div>
-    <div class="section-title">${editing ? `Edit Account - ${escapeHtml(editing.name)}` : 'Add Account'}</div>
+    ${renderPager("chartOfAccounts", page, totalPages, total)}
+  </div>
+  <details class="collapse-card" id="accFormDetails" ${(accFormDetailsOpen || editing) ? 'open' : ''}>
+    <summary>${editing ? `Edit Account - ${escapeHtml(editing.name)}` : `Add Account <span class="hotkey-tag">Alt+C</span>`}<span class="sub">Name, group, party status, opening balance, mailing/tax/banking details.</span></summary>
+    <div class="collapse-body">
     <input type="hidden" id="accEditingId" value="${accEditingId||''}">
     <div class="grid grid-4">
       <div class="field"><label>Name</label><input id="acc_name" placeholder="e.g. Electricity Expense" value="${editing?escapeHtml(editing.name):''}"></div>
@@ -2743,7 +2908,8 @@ function renderChartOfAccounts(){
       <button class="btn gold" id="addAccBtn">${editing ? 'Save Changes' : 'Add Account'}</button>
       ${editing ? `<button class="btn ghost" id="cancelAccEditBtn">Cancel Edit</button>` : ''}
     </div>
-  </div>`;
+    </div>
+  </details>`;
 }
 
 // ---- Vouchers (entry + Day Book) ----
@@ -2764,8 +2930,10 @@ function renderVouchersView(){
   else if(NON_ACCOUNTING_VOUCHER_TYPES.includes(voucherType)) form = voucherFormOrderNote(voucherType);
   else form = voucherFormJournal();
 
-  const dayRows = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
-    .sort((a,b)=>b.date.localeCompare(a.date)).map(v=>{
+  const dayBookVouchers = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  const { pageItems: dayBookPage, page: dayBookPageNum, totalPages: dayBookTotalPages, total: dayBookTotal } = paginate(dayBookVouchers, "dayBook", 25);
+  const dayRows = dayBookPage.map(v=>{
       const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
       const items = DB.voucherItems.filter(i=>i.voucherId===v.id);
       const isNonAcct = NON_ACCOUNTING_VOUCHER_TYPES.includes(v.voucherType);
@@ -2792,21 +2960,12 @@ function renderVouchersView(){
     ${voucherEditingId ? `<p class="helptext">Editing ${voucherTypeLabel(voucherType)} ${(DB.vouchers.find(v=>v.id===voucherEditingId)||{}).voucherNo||''} - Save updates it in place (same voucher number). <button type="button" class="btn ghost sm" id="cancelVoucherEditBtn">Cancel, start new instead</button></p>`
       : `<div class="sub">Pick the voucher type that matches what actually happened. Not sure which? Hover over a type below, or see the one-line guide under the buttons.</div>
     <div class="row" style="margin-bottom:6px;">
-      ${types.map(([t,l])=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}" title="${escapeHtml(VOUCHER_TYPE_HELP[t]||'')}">${l}</button>`).join("")}
+      ${types.map(([t,l])=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}" title="${escapeHtml(VOUCHER_TYPE_HELP[t]||'')}">${VOUCHER_TYPE_HOTKEY[t]?`<span class="hotkey-tag">${VOUCHER_TYPE_HOTKEY[t]}</span> `:''}${l}</button>`).join("")}
     </div>
     <p class="helptext" style="margin-bottom:14px;">${escapeHtml(VOUCHER_TYPE_HELP[voucherType]||'')}</p>`}
     ${form}
   </div>
-  <div class="card">
-    <h2>Import Vouchers from CSV</h2>
-    <div class="sub">For bulk-adding Payment/Receipt transactions (e.g. from a bank statement or spreadsheet). Each row needs an Account name that already exists in your Chart of Accounts - the other side always posts to Bank Account.</div>
-    <div class="row">
-      <button class="btn ghost" id="downloadVoucherCsvTemplateBtn">Download CSV Template</button>
-      <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importVoucherCsvInput" accept=".csv" style="display:none;"></label>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Day Book</h2>
+  <details class="collapse-card" id="dayBookDetails" ${booksDayBookOpen?'open':''}><summary>Day Book<span class="sub">Every voucher in a date range - all vouchers you've entered recently.</span></summary><div class="collapse-body">
     <div class="row">
       <div class="field" style="max-width:160px;"><label>From</label><input type="date" id="db_from" value="${booksDayRange.from}"></div>
       <div class="field" style="max-width:160px;"><label>To</label><input type="date" id="db_to" value="${booksDayRange.to}"></div>
@@ -2819,7 +2978,15 @@ function renderVouchersView(){
         <tbody>${dayRows || `<tr><td colspan="7" class="empty">No vouchers in this range.</td></tr>`}</tbody>
       </table>
     </div>
-  </div>`;
+    ${renderPager("dayBook", dayBookPageNum, dayBookTotalPages, dayBookTotal)}
+  </div></details>
+  <details class="collapse-card" id="csvImportDetails" ${booksCsvImportOpen?'open':''}><summary>Import Vouchers from CSV<span class="sub">Bulk-add Payment/Receipt transactions from a bank statement or spreadsheet.</span></summary><div class="collapse-body">
+    <div class="sub">Each row needs an Account name that already exists in your Chart of Accounts - the other side always posts to Bank Account.</div>
+    <div class="row">
+      <button class="btn ghost" id="downloadVoucherCsvTemplateBtn">Download CSV Template</button>
+      <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importVoucherCsvInput" accept=".csv" style="display:none;"></label>
+    </div>
+  </div></details>`;
 }
 
 // Minimal CSV importer for Payment/Receipt vouchers - Account must match an
@@ -3241,16 +3408,21 @@ function renderPartyLedgers(){
   if(booksPartyId){
     const postings = getAllPostings().filter(p=>p.accountId===booksPartyId);
     let running = 0;
-    const rows = postings.map(p=>{
+    const postingsWithBalance = postings.map(p=>{
       running += (p.debit||0)-(p.credit||0);
+      return {...p, runningBalance: running};
+    });
+    const { pageItems: ledgerPage, page: ledgerPageNum, totalPages: ledgerTotalPages, total: ledgerTotal } = paginate(postingsWithBalance, "partyLedgerDetail", 25);
+    const rows = ledgerPage.map(p=>{
       const allocs = p.voucherId ? billAllocationsForVoucher(p.voucherId) : [];
       const isSettlingType = ["Payment","Receipt","CreditNote","DebitNote"].includes(p.voucherType);
       const agstRef = allocs.length ? allocs.map(a=>`Agst ${a.billVoucherNo}: ${fmt0(a.amount)}`).join(", ") : (isSettlingType ? "On Account" : "");
-      return `<tr><td>${p.date}</td><td>${p.voucherNo}</td><td>${p.particulars}</td><td>${agstRef}</td><td class="num">${p.debit?fmt(p.debit):''}</td><td class="num">${p.credit?fmt(p.credit):''}</td><td class="num">${fmt(running)}</td></tr>`;
+      return `<tr><td>${p.date}</td><td>${p.voucherNo}</td><td>${p.particulars}</td><td>${agstRef}</td><td class="num">${p.debit?fmt(p.debit):''}</td><td class="num">${p.credit?fmt(p.credit):''}</td><td class="num">${fmt(p.runningBalance)}</td></tr>`;
     }).join("");
     detail = `<div class="card"><h2>Ledger - ${accName(booksPartyId)}</h2>
       <div class="tablewrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th>Agst Ref</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions yet.</td></tr>`}</tbody></table></div></div>`;
+      <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions yet.</td></tr>`}</tbody></table></div>
+      ${renderPager("partyLedgerDetail", ledgerPageNum, ledgerTotalPages, ledgerTotal)}</div>`;
 
     const openBills = openBillsForParty(booksPartyId);
     const billRows = openBills.map(b=>`<tr><td>${b.voucher.date}</td><td>${b.voucher.voucherType} ${b.voucher.voucherNo}</td>
@@ -3261,18 +3433,23 @@ function renderPartyLedgers(){
       <tbody>${billRows || `<tr><td colspan="5" class="empty">No open bills.</td></tr>`}</tbody></table></div></div>`;
   }
 
+  const { pageItems: debtorsPage, page: debtorsPageNum, totalPages: debtorsTotalPages, total: debtorsTotal } = paginate(debtors, "partyDebtors", 20);
+  const { pageItems: creditorsPage, page: creditorsPageNum, totalPages: creditorsTotalPages, total: creditorsTotal } = paginate(creditors, "partyCreditors", 20);
+
   return `
   <div class="card">
     <h2>Sundry Debtors (Customers who owe you)</h2>
     <div class="sub">Every account marked as a Debtor in Chart of Accounts. Balance is what they currently owe; the four columns split that by how long it's been outstanding (aging), so you can spot overdue customers at a glance.</div>
     <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${debtors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet - add one in Chart of Accounts and mark it as a Debtor.</td></tr>`}</tbody></table></div>
+    <tbody>${debtorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet - add one in Chart of Accounts and mark it as a Debtor.</td></tr>`}</tbody></table></div>
+    ${renderPager("partyDebtors", debtorsPageNum, debtorsTotalPages, debtorsTotal)}
   </div>
   <div class="card">
     <h2>Sundry Creditors (Vendors you owe)</h2>
     <div class="sub">Every account marked as a Creditor in Chart of Accounts, with the same aging breakdown for what you owe them.</div>
     <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${creditors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet - add one in Chart of Accounts and mark it as a Creditor.</td></tr>`}</tbody></table></div>
+    <tbody>${creditorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet - add one in Chart of Accounts and mark it as a Creditor.</td></tr>`}</tbody></table></div>
+    ${renderPager("partyCreditors", creditorsPageNum, creditorsTotalPages, creditorsTotal)}
   </div>
   <div class="card">
     <h2>View a Party's Full Ledger</h2>
@@ -3415,7 +3592,8 @@ function renderBankReconciliation(){
   const difference = round2(reconcileStatementBalance - reconciledBalance);
   const unclearedTotal = round2(rowsData.filter(x=>!x.line.bankReconciled).reduce((s,x)=>s + sign*((x.line.debit||0)-(x.line.credit||0)), 0));
 
-  const rows = rowsData.map(({line,voucher})=>`
+  const { pageItems: reconcilePage, page: reconcilePageNum, totalPages: reconcileTotalPages, total: reconcileTotal } = paginate(rowsData, "bankReconcile", 25);
+  const rows = reconcilePage.map(({line,voucher})=>`
     <tr>
       <td>${voucher.date}</td><td>${voucherTypeLabel(voucher.voucherType)} ${voucher.voucherNo}</td>
       <td>${voucher.narration||line.lineNarration||''}</td>
@@ -3448,6 +3626,7 @@ function renderBankReconciliation(){
         <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions for this account.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("bankReconcile", reconcilePageNum, reconcileTotalPages, reconcileTotal)}
   </div>`;
 }
 
@@ -3938,6 +4117,80 @@ function computeMonthlyShortfall(empId, month, year){
   return shortfall;
 }
 
+// Counts full calendar days this month (up to today) where the employee has
+// zero punch sessions and no approved leave/holiday/Sunday covers it - i.e.
+// a plain no-show. Distinct from computeMonthlyShortfall, which also counts
+// partial (Half Day) shortfalls in hours - this is whole days only, for a
+// simple headline number HR can't miss.
+function absentDaysThisMonth(empId, month, year){
+  const emp = DB.employees.find(e=>e.id===empId);
+  if(!emp || emp.status !== "Active") return 0;
+  const totalDays = daysInMonth(year, month);
+  const todayStr = new Date().toISOString().slice(0,10);
+  let count = 0;
+  for(let d=1; d<=totalDays; d++){
+    const dateStr = `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    if(dateStr > todayStr) break;
+    if(dateStr < emp.doj) continue;
+    if(statusForDay(empId, dateStr) === "Absent") count++;
+  }
+  return count;
+}
+
+// The actual list of absent dates in a range (not just a count) - powers
+// both the Absent Dates Lookup card here and the Reports export.
+function absentDatesInRange(empId, from, to){
+  const emp = DB.employees.find(e=>e.id===empId);
+  if(!emp || emp.status !== "Active") return [];
+  const todayStr = new Date().toISOString().slice(0,10);
+  const rangeTo = to > todayStr ? todayStr : to;
+  const start = from < emp.doj ? emp.doj : from;
+  const dates = [];
+  let d = new Date(start+"T00:00:00");
+  const end = new Date(rangeTo+"T00:00:00");
+  while(d <= end){
+    const dateStr = d.toISOString().slice(0,10);
+    if(statusForDay(empId, dateStr) === "Absent") dates.push(dateStr);
+    d.setDate(d.getDate()+1);
+  }
+  return dates;
+}
+
+let absentLookupEmpId = null;
+let absentLookupFrom = null;
+let absentLookupTo = null;
+function renderAbsentDatesLookupCard(){
+  if(!DB.employees.some(e=>e.status==="Active")) return "";
+  if(!absentLookupEmpId || !DB.employees.some(e=>e.id===absentLookupEmpId && e.status==="Active")){
+    absentLookupEmpId = DB.employees.filter(e=>e.status==="Active").sort((a,b)=>a.id.localeCompare(b.id))[0].id;
+  }
+  if(!absentLookupFrom || !absentLookupTo){
+    const r = quickRange("month"); absentLookupFrom = r.from; absentLookupTo = r.to;
+  }
+  const dates = absentDatesInRange(absentLookupEmpId, absentLookupFrom, absentLookupTo);
+  const emp = DB.employees.find(e=>e.id===absentLookupEmpId);
+  return `
+  <div class="card">
+    <h2>Absent Dates Lookup</h2>
+    <div class="sub">Pick an employee and date range to see the exact dates they were marked Absent - the same logic behind the Absent Days (Month) column and the Reports export.</div>
+    <div class="row">
+      <div class="field"><label>Employee</label>
+        <select id="absentLookupEmpSelect">${DB.employees.filter(e=>e.status==="Active").sort((a,b)=>a.id.localeCompare(b.id)).map(e=>`<option value="${e.id}" ${e.id===absentLookupEmpId?'selected':''}>${e.id} - ${e.name}</option>`).join("")}</select>
+      </div>
+      <div class="field" style="max-width:160px;"><label>From</label><input type="date" id="absentLookupFromInput" value="${absentLookupFrom}"></div>
+      <div class="field" style="max-width:160px;"><label>To</label><input type="date" id="absentLookupToInput" value="${absentLookupTo}"></div>
+    </div>
+    <p class="helptext">${emp ? escapeHtml(emp.name) : ''} was absent on <b>${dates.length}</b> day(s) in this range.</p>
+    ${dates.length ? `
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Date</th><th>Day</th></tr></thead>
+        <tbody>${dates.map(d=>`<tr><td>${d}</td><td>${new Date(d+"T00:00:00").toLocaleDateString("en-IN",{weekday:"long"})}</td></tr>`).join("")}</tbody>
+      </table>
+    </div>` : `<div class="empty">No absences in this range.</div>`}
+  </div>`;
+}
+
 function renderAttendance(){
   if(!attDate) attDate = new Date().toISOString().slice(0,10);
 
@@ -3945,6 +4198,7 @@ function renderAttendance(){
     return renderMyAttendance();
   }
 
+  const attMonth = Number(attDate.slice(5,7)), attYear = Number(attDate.slice(0,4));
   const rows = DB.employees.filter(e=>e.status==="Active").map(e=>{
     const sessions = sessionsForDay(e.id, attDate);
     const hrs = hoursForDay(e.id, attDate);
@@ -3952,6 +4206,7 @@ function renderAttendance(){
     const dropdownValue = (override && override.status) || "Present";
     const first = sessions[0];
     const last = sessions[sessions.length-1];
+    const absentDays = absentDaysThisMonth(e.id, attMonth, attYear);
     return `<tr data-emp="${e.id}" data-search="${escapeHtml((e.id+' '+e.name).toLowerCase())}">
       <td>${e.id}</td><td>${e.name}</td>
       <td>${first ? new Date(first.punchIn).toLocaleTimeString() : '<span class="helptext">-</span>'}</td>
@@ -3959,6 +4214,7 @@ function renderAttendance(){
       <td>${sessions.length}</td>
       <td>${sessions.length ? formatHours(hrs) : '<span class="helptext">-</span>'}</td>
       <td>${statusForDay(e.id, attDate)}</td>
+      <td style="text-align:center;">${absentDays>0 ? `<span class="pill warn">${absentDays}</span>` : '<span class="helptext">0</span>'}</td>
       <td>
         <select class="attStatus" data-emp="${e.id}">
           ${["Present","Absent","Half Day","On Leave"].map(s=>`<option ${s===dropdownValue?'selected':''}>${s}</option>`).join("")}
@@ -3975,7 +4231,7 @@ function renderAttendance(){
   return `
   <div class="card">
     <h2>Daily Attendance</h2>
-    <div class="sub">Status is auto-calculated from actual hours worked (≥${ATTENDANCE_TARGET_HOURS}h Present, ${ATTENDANCE_HALF_DAY_MIN_HOURS}–${ATTENDANCE_TARGET_HOURS}h Half Day, under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h Absent). Use the dropdown to override a specific day (e.g. On Leave) - it always wins over the auto-calculated status.</div>
+    <div class="sub">Status is auto-calculated from actual hours worked (≥${ATTENDANCE_TARGET_HOURS}h Present, ${ATTENDANCE_HALF_DAY_MIN_HOURS}–${ATTENDANCE_TARGET_HOURS}h Half Day, under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h Absent). No punch at all on a working day auto-marks Absent - use the dropdown to override a specific day (e.g. On Leave) - it always wins over the auto-calculated status. "Absent Days" totals the selected date's month and directly drives the LOP Hours suggestion in Payroll.</div>
     <div class="row">
       <div class="field" style="max-width:160px;"><label>Date</label><input type="date" id="attDateInput" value="${attDate}"></div>
       <button class="btn ghost" id="loadAttBtn">Load</button>
@@ -3985,11 +4241,12 @@ function renderAttendance(){
     <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="attSearchInput" placeholder="Search by employee name or ID… (filters view only)"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th><th>Override</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="empty">No employees found.</td></tr>`}</tbody>
+        <thead><tr><th>ID</th><th>Name</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th><th style="text-align:center;white-space:nowrap;">Absent<br>(Month)</th><th>Override</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" class="empty">No employees found.</td></tr>`}</tbody>
       </table>
     </div>
-  </div>`;
+  </div>
+  ${renderAbsentDatesLookupCard()}`;
 }
 
 // ============================= MY PROFILE (self-service) =============================
@@ -4012,10 +4269,22 @@ function renderMyProfile(){
           ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
         </div>
       </div>`;
+  const overviewField = (label, value) => `<div class="field"><label>${label}</label><div style="padding:7px 9px;font-size:13px;">${value||'<span class="helptext">-</span>'}</div></div>`;
   return `
   <div class="card">
     <h2>My Profile</h2>
     <div class="sub">Keep your own details up to date - HR uses this for payroll and records. Changes save straight to your employee record. Set your Date of Birth so we can wish you on your birthday!</div>
+    <div class="section-title">Overview</div>
+    <p class="helptext">These are set by HR - contact them if anything here needs correcting.</p>
+    <div class="grid grid-4">
+      ${overviewField('Emp ID', escapeHtml(emp.id))}
+      ${overviewField('Name', escapeHtml(emp.name))}
+      ${overviewField('Designation', escapeHtml(d.designation||''))}
+      ${overviewField('Department', escapeHtml(d.department||''))}
+      ${overviewField('Email', escapeHtml(emp.email||''))}
+      ${overviewField('Date of Joining', emp.doj)}
+      ${overviewField('Status', `<span class="pill ${emp.status==='Active'?'ok':'warn'}">${emp.status}</span>`)}
+    </div>
     <p class="helptext">For your security, PAN, Aadhar and Bank A/c No. are masked once saved. Click "Change" next to a field to clear and re-enter it.</p>
     <div class="section-title">Personal Details</div>
     <div class="grid grid-4">
@@ -4526,7 +4795,7 @@ function renderCRM(){
       </table>
     </div>
     ${renderPager("leads", ldPage, ldTotalPages, ldTotal)}
-    <div class="section-title" id="ldFormTitle">Add Lead</div>
+    <div class="section-title" id="ldFormTitle">Add Lead <span class="hotkey-tag">Alt+C</span></div>
     <input type="hidden" id="ld_editing_id" value="">
     <div class="grid grid-4">
       <div class="field"><label>Name</label><input id="ld_name" placeholder="Contact name"></div>
@@ -4738,6 +5007,42 @@ const REPORT_DEFS = {
         });
       });
       return out;
+    }
+  },
+  absentSummary: {
+    label: "Attendance - Absent Days Summary", headers: ["Emp ID","Name","Days in Range","Present","Half Day","Absent","On Leave","Weekly Off","Holiday"],
+    dateNote: "One row per active employee, tallying their daily status across the whole date range - includes days with zero punches (marked Absent), not just days with a recorded session.",
+    rows(from,to){
+      const todayStr = new Date().toISOString().slice(0,10);
+      const rangeTo = to > todayStr ? todayStr : to;
+      return DB.employees.filter(e=>e.status==="Active").map(e=>{
+        const start = from < e.doj ? e.doj : from;
+        const counts = {Present:0,"Half Day":0,Absent:0,"On Leave":0,"Weekly Off":0,Holiday:0};
+        let d = new Date(start+"T00:00:00");
+        const end = new Date(rangeTo+"T00:00:00");
+        let total = 0;
+        while(d <= end){
+          const dateStr = d.toISOString().slice(0,10);
+          const s = statusForDay(e.id, dateStr);
+          if(counts[s]!==undefined) counts[s]++;
+          total++;
+          d.setDate(d.getDate()+1);
+        }
+        return [e.id, e.name, total, counts.Present, counts["Half Day"], counts.Absent, counts["On Leave"], counts["Weekly Off"], counts.Holiday];
+      });
+    }
+  },
+  absentDates: {
+    label: "Attendance - Absent Dates Detail", headers: ["Emp ID","Name","Date","Day"],
+    dateNote: "One row per employee per absent date in range - the exact calendar dates each active employee had zero punches, not just a count.",
+    rows(from,to){
+      const out = [];
+      DB.employees.filter(e=>e.status==="Active").forEach(e=>{
+        absentDatesInRange(e.id, from, to).forEach(d=>{
+          out.push([e.id, e.name, d, new Date(d+"T00:00:00").toLocaleDateString("en-IN",{weekday:"long"})]);
+        });
+      });
+      return out.sort((a,b)=>a[2].localeCompare(b[2]) || a[0].localeCompare(b[0]));
     }
   },
   leaves: {
@@ -5214,6 +5519,19 @@ function attachHandlers(){
       document.getElementById("cancelEmpBtn").style.display = "inline-block";
       window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"});
     });
+    const salaryDetailsCard = document.getElementById("salaryDetailsCard");
+    if(salaryDetailsCard) salaryDetailsCard.ontoggle = ()=>{ empSalaryDetailsOpen = salaryDetailsCard.open; };
+    const onboardDetailsCard = document.getElementById("onboardDetailsCard");
+    if(onboardDetailsCard) onboardDetailsCard.ontoggle = ()=>{ empOnboardDetailsOpen = onboardDetailsCard.open; };
+    const letterDetailsCard = document.getElementById("letterDetailsCard");
+    if(letterDetailsCard) letterDetailsCard.ontoggle = ()=>{ empLetterDetailsOpen = letterDetailsCard.open; };
+    document.querySelectorAll(".form-tab-btn").forEach(b=>b.onclick=()=>{
+      document.querySelectorAll(".form-tab-btn").forEach(x=>x.classList.remove("active"));
+      b.classList.add("active");
+      document.querySelectorAll(".empFormTabPane").forEach(p=>p.style.display="none");
+      const pane = document.getElementById("empTab_"+b.dataset.tab);
+      if(pane) pane.style.display="";
+    });
     document.querySelectorAll(".salStructBtn").forEach(b=>b.onclick=(e)=>{
       const id = e.target.closest("tr").dataset.id;
       salStructEmpId = id;
@@ -5511,6 +5829,10 @@ function attachHandlers(){
   }
 
   if(activeTab==="Payroll"){
+    document.querySelectorAll(".useLopBtn").forEach(b=>b.onclick=()=>{
+      const input = document.querySelector(`.lopInput[data-emp="${b.dataset.emp}"]`);
+      if(input){ input.value = b.dataset.hours; b.closest(".helptext").remove(); }
+    });
     document.getElementById("loadPeriodBtn").onclick = async ()=>{
       const btn = document.getElementById("loadPeriodBtn");
       btn.disabled = true; btn.textContent = "Loading…";
@@ -5830,6 +6152,8 @@ function attachHandlers(){
     }
 
     if(booksView==="accounts"){
+      const accFormDetails = document.getElementById("accFormDetails");
+      if(accFormDetails) accFormDetails.ontoggle = ()=>{ accFormDetailsOpen = accFormDetails.open; };
       document.getElementById("addAccBtn").onclick = async ()=>{
         const editingId = val("accEditingId");
         const name = val("acc_name").trim();
@@ -5883,6 +6207,7 @@ function attachHandlers(){
         accEditingId = e.target.closest("tr").dataset.id;
         const acc = DB.ledgerAccounts.find(a=>a.id===accEditingId);
         openingBillsDraft = (acc && acc.details && acc.details.openingBills || []).map(b=>({...b}));
+        accFormDetailsOpen = true;
         renderAll();
         const el = document.getElementById("acc_name");
         if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
@@ -5925,8 +6250,12 @@ function attachHandlers(){
       });
       const cancelVoucherEditBtn = document.getElementById("cancelVoucherEditBtn");
       if(cancelVoucherEditBtn) cancelVoucherEditBtn.onclick = ()=>{ resetVoucherFormState(); renderAll(); };
+      const dayBookDetails = document.getElementById("dayBookDetails");
+      if(dayBookDetails) dayBookDetails.ontoggle = ()=>{ booksDayBookOpen = dayBookDetails.open; };
+      const csvImportDetails = document.getElementById("csvImportDetails");
+      if(csvImportDetails) csvImportDetails.ontoggle = ()=>{ booksCsvImportOpen = csvImportDetails.open; };
       document.getElementById("loadDayBookBtn").onclick = ()=>{
-        booksDayRange = {from: val("db_from"), to: val("db_to")}; renderAll();
+        booksDayRange = {from: val("db_from"), to: val("db_to")}; booksDayBookOpen = true; renderAll();
       };
       document.getElementById("exportDayBookBtn").onclick = ()=>{
         const rows = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
@@ -6447,6 +6776,12 @@ function attachHandlers(){
         renderAll();
       };
       wireLiveRowFilter("attSearchInput");
+      const absentLookupEmpSelect = document.getElementById("absentLookupEmpSelect");
+      if(absentLookupEmpSelect) absentLookupEmpSelect.onchange = ()=>{ absentLookupEmpId = absentLookupEmpSelect.value; renderAll(); };
+      const absentLookupFromInput = document.getElementById("absentLookupFromInput");
+      if(absentLookupFromInput) absentLookupFromInput.onchange = ()=>{ absentLookupFrom = absentLookupFromInput.value; renderAll(); };
+      const absentLookupToInput = document.getElementById("absentLookupToInput");
+      if(absentLookupToInput) absentLookupToInput.onchange = ()=>{ absentLookupTo = absentLookupToInput.value; renderAll(); };
     }
   }
 
@@ -6942,6 +7277,85 @@ async function emailPayslip(){
   }
 }
 
+// ============================= KEYBOARD SHORTCUTS (Tally-style) =============================
+let shortcutsPanelOpen = false;
+function toggleShortcutsPanel(open){
+  shortcutsPanelOpen = open==null ? !shortcutsPanelOpen : open;
+  const panel = document.getElementById("shortcutsPanel");
+  const overlay = document.getElementById("shortcutsOverlay");
+  if(panel) panel.classList.toggle("open", shortcutsPanelOpen);
+  if(overlay) overlay.classList.toggle("open", shortcutsPanelOpen);
+}
+
+function selectVoucherType(type){
+  if(activeTab!=="Books") return;
+  voucherType = type;
+  resetVoucherFormState();
+  renderAll();
+}
+
+function focusField(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const details = el.closest("details");
+  if(details && !details.open) details.open = true; // fires "toggle", which syncs the matching *DetailsOpen state var
+  el.scrollIntoView({behavior:"smooth", block:"center"});
+  setTimeout(()=>el.focus(), 250);
+}
+
+// Maps the screen currently on-screen to the field that should get focus for
+// "Create New" (Alt+C) - the whole point being: never scroll to find the add
+// form again. Keyed by activeTab, with Books further split by booksView.
+function createNewFocusTarget(){
+  if(activeTab==="Employees") return "f_name";
+  if(activeTab==="CRM") return "ld_name";
+  if(activeTab==="Books"){
+    if(booksView==="accounts") return "acc_name";
+    if(booksView==="items") return "item_name";
+  }
+  return null;
+}
+
+const VOUCHER_HOTKEYS = {F4:"Contra", F5:"Payment", F6:"Receipt", F7:"Journal", F8:"Sales", F9:"Purchase"};
+const VOUCHER_HOTKEYS_CTRL = {F8:"CreditNote", F9:"DebitNote"};
+
+function initGlobalShortcuts(){
+  if(window.__shortcutsInitialized) return;
+  window.__shortcutsInitialized = true;
+  document.addEventListener("keydown", (e)=>{
+    const appRoot = document.getElementById("appRoot");
+    if(!appRoot || appRoot.style.display==="none") return; // not logged in yet
+
+    if(e.key==="F1"){ e.preventDefault(); toggleShortcutsPanel(); return; }
+
+    if(e.key==="Escape"){
+      if(shortcutsPanelOpen){ toggleShortcutsPanel(false); return; }
+      if(document.activeElement) document.activeElement.blur();
+      return;
+    }
+
+    if(e.ctrlKey && e.key==="Enter"){
+      e.preventDefault();
+      // .gold is also used to highlight the *selected* nav/voucher-type button (not a save
+      // action) - exclude those so this always finds the actual primary Save/Add button.
+      const btn = document.querySelector("#main .btn.gold:not(.booksNavBtn):not(.voucherTypeBtn)");
+      if(btn) btn.click();
+      return;
+    }
+
+    if(activeTab==="Books" && booksView==="vouchers" && !voucherEditingId){
+      if(!e.ctrlKey && VOUCHER_HOTKEYS[e.key]){ e.preventDefault(); selectVoucherType(VOUCHER_HOTKEYS[e.key]); return; }
+      if(e.ctrlKey && VOUCHER_HOTKEYS_CTRL[e.key]){ e.preventDefault(); selectVoucherType(VOUCHER_HOTKEYS_CTRL[e.key]); return; }
+    }
+
+    if(e.altKey && (e.key==="c" || e.key==="C")){
+      const target = createNewFocusTarget();
+      if(target){ e.preventDefault(); focusField(target); }
+      return;
+    }
+  });
+}
+
 // ============================= INIT =============================
 function setAuthMode(mode){
   const isSignup = mode === "signup";
@@ -6982,6 +7396,10 @@ async function startApp(){
   if(currentProfile.role === "Admin" || currentProfile.role === "Director"){ await loadTeam(); await loadAuditLog(); }
   if(currentProfile.role !== "Employee"){ await loadAccountingData(); }
   if(currentProfile.role === "Employee"){ await loadMyDevices(); }
+  initGlobalShortcuts();
+  document.getElementById("shortcutsBtn").onclick = ()=>toggleShortcutsPanel();
+  document.getElementById("closeShortcutsBtn").onclick = ()=>toggleShortcutsPanel(false);
+  document.getElementById("shortcutsOverlay").onclick = ()=>toggleShortcutsPanel(false);
   renderAll();
 }
 
