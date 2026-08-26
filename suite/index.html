@@ -2810,6 +2810,7 @@ function renderStockItems(){
 
 // ---- Chart of Accounts ----
 let accEditingId = null;
+let accFormDetailsOpen = false;
 let openingBillsDraft = []; // [{id,date,reference,amount}] - draft for the Opening Bills section, synced from the account being edited by editAccBtn
 function renderChartOfAccounts(){
   const sorted = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name));
@@ -2839,7 +2840,10 @@ function renderChartOfAccounts(){
       </table>
     </div>
     ${renderPager("chartOfAccounts", page, totalPages, total)}
-    <div class="section-title">${editing ? `Edit Account - ${escapeHtml(editing.name)}` : `Add Account <span class="hotkey-tag">Alt+C</span>`}</div>
+  </div>
+  <details class="collapse-card" id="accFormDetails" ${(accFormDetailsOpen || editing) ? 'open' : ''}>
+    <summary>${editing ? `Edit Account - ${escapeHtml(editing.name)}` : `Add Account <span class="hotkey-tag">Alt+C</span>`}<span class="sub">Name, group, party status, opening balance, mailing/tax/banking details.</span></summary>
+    <div class="collapse-body">
     <input type="hidden" id="accEditingId" value="${accEditingId||''}">
     <div class="grid grid-4">
       <div class="field"><label>Name</label><input id="acc_name" placeholder="e.g. Electricity Expense" value="${editing?escapeHtml(editing.name):''}"></div>
@@ -2904,7 +2908,8 @@ function renderChartOfAccounts(){
       <button class="btn gold" id="addAccBtn">${editing ? 'Save Changes' : 'Add Account'}</button>
       ${editing ? `<button class="btn ghost" id="cancelAccEditBtn">Cancel Edit</button>` : ''}
     </div>
-  </div>`;
+    </div>
+  </details>`;
 }
 
 // ---- Vouchers (entry + Day Book) ----
@@ -6147,6 +6152,8 @@ function attachHandlers(){
     }
 
     if(booksView==="accounts"){
+      const accFormDetails = document.getElementById("accFormDetails");
+      if(accFormDetails) accFormDetails.ontoggle = ()=>{ accFormDetailsOpen = accFormDetails.open; };
       document.getElementById("addAccBtn").onclick = async ()=>{
         const editingId = val("accEditingId");
         const name = val("acc_name").trim();
@@ -6200,6 +6207,7 @@ function attachHandlers(){
         accEditingId = e.target.closest("tr").dataset.id;
         const acc = DB.ledgerAccounts.find(a=>a.id===accEditingId);
         openingBillsDraft = (acc && acc.details && acc.details.openingBills || []).map(b=>({...b}));
+        accFormDetailsOpen = true;
         renderAll();
         const el = document.getElementById("acc_name");
         if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
@@ -7289,6 +7297,8 @@ function selectVoucherType(type){
 function focusField(id){
   const el = document.getElementById(id);
   if(!el) return;
+  const details = el.closest("details");
+  if(details && !details.open) details.open = true; // fires "toggle", which syncs the matching *DetailsOpen state var
   el.scrollIntoView({behavior:"smooth", block:"center"});
   setTimeout(()=>el.focus(), 250);
 }
