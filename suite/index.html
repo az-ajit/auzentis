@@ -1805,11 +1805,31 @@ const ACC_GROUPS_BY_NATURE = {
   Income: ["Sales Accounts","Indirect Income"],
   Expense: ["Purchase Accounts","Direct Expenses","Indirect Expenses"]
 };
-const VOUCHER_PREFIX = {Sales:"SAL", Purchase:"PUR", CreditNote:"CN", DebitNote:"DN", Payment:"PAY", Receipt:"REC", Journal:"JNL", Contra:"CTR"};
+const VOUCHER_PREFIX = {Sales:"SAL", Purchase:"PUR", CreditNote:"CN", DebitNote:"DN", Payment:"PAY", Receipt:"REC", Journal:"JNL", Contra:"CTR",
+  SalesOrder:"SO", PurchaseOrder:"PO", DeliveryNote:"DC", ReceiptNote:"RN"};
+// Non-accounting: Sales/Purchase Orders and Delivery/Receipt Notes are
+// reference-tracking documents only — they never post Dr/Cr lines to the
+// ledger, just record items/party for later "Convert to Invoice".
+const NON_ACCOUNTING_VOUCHER_TYPES = ["SalesOrder","PurchaseOrder","DeliveryNote","ReceiptNote"];
+const VOUCHER_TYPE_HELP = {
+  Sales: "Posts revenue: increases what the customer owes you, increases Sales income, and the applicable GST liability.",
+  Purchase: "Posts an expense: increases what you owe the vendor, increases Purchase expense, and the applicable GST input credit.",
+  CreditNote: "Reduces a Sales bill — for returns, rate corrections, or discounts given after the invoice. Reduces the customer's balance, Sales income, and GST liability. Can be tied to the original invoice via Bill-wise Allocation.",
+  DebitNote: "Reduces a Purchase bill — for returns to a vendor or rate corrections. Reduces what you owe them, Purchase expense, and GST input credit. Can be tied to the original bill via Bill-wise Allocation.",
+  Payment: "Money going out — to a vendor (settles a payable, optionally against specific bills) or as a direct expense (rent, utilities, etc. with no vendor ledger).",
+  Receipt: "Money coming in — from a customer (settles a receivable, optionally against specific bills) or as direct income (with no customer ledger).",
+  Journal: "Manual Dr/Cr adjustment across any accounts — corrections, provisions, depreciation, anything that isn't a Sales/Purchase/Payment/Receipt.",
+  Contra: "Moving money between your own Cash/Bank accounts — a cash deposit or withdrawal. Never affects a party or income/expense.",
+  SalesOrder: "A customer's order before you've delivered or invoiced anything — no ledger impact. \"Convert to Invoice\" once fulfilled.",
+  PurchaseOrder: "Your order placed with a vendor before goods/invoice arrive — no ledger impact. \"Convert to Invoice\" once billed.",
+  DeliveryNote: "Records goods sent to a customer ahead of invoicing (e.g. dispatch before billing) — no ledger impact. \"Convert to Invoice\" to bill it.",
+  ReceiptNote: "Records goods received from a vendor ahead of their invoice — no ledger impact. \"Convert to Invoice\" once billed."
+};
 
 function normalSign(nature){ return (nature==="Asset"||nature==="Expense") ? 1 : -1; }
 function accName(id){ const a = DB.ledgerAccounts.find(x=>x.id===id); return a ? a.name : id; }
-function voucherTypeLabel(t){ return t==="CreditNote" ? "Credit Note" : t==="DebitNote" ? "Debit Note" : t; }
+const VOUCHER_TYPE_LABELS = {CreditNote:"Credit Note", DebitNote:"Debit Note", SalesOrder:"Sales Order", PurchaseOrder:"Purchase Order", DeliveryNote:"Delivery Note", ReceiptNote:"Receipt Note"};
+function voucherTypeLabel(t){ return VOUCHER_TYPE_LABELS[t] || t; }
 
 function getPayrollVirtualPostings(){
   const out = [];
@@ -1959,6 +1979,30 @@ async function saveVoucher(voucher, lines){
   }catch(e){ console.error(e); toast("Could not save voucher: " + e.message, true); return false; }
 }
 
+// For non-accounting tracking documents (Sales/Purchase Order, Delivery/
+// Receipt Note) — same voucher+items shape as saveVoucher, but no Dr/Cr
+// lines at all since these never post to the ledger.
+async function saveNonAccountingVoucher(voucher, items){
+  try{
+    const { error: vErr } = await sb.from("vouchers").insert({
+      id:voucher.id, voucher_type:voucher.voucherType, voucher_no:voucher.voucherNo, date:voucher.date,
+      party_id:voucher.partyId||null, narration:voucher.narration||null, reference:voucher.reference||null,
+      created_by:currentUser.id
+    });
+    if(vErr){ toast("Could not save: " + vErr.message, true); return false; }
+    DB.vouchers.push({id:voucher.id, voucherType:voucher.voucherType, voucherNo:voucher.voucherNo, date:voucher.date,
+      partyId:voucher.partyId, narration:voucher.narration, reference:voucher.reference});
+    if(items && items.length){
+      const rows = items.map(it=>({id:newId("VI"), voucher_id:voucher.id, stock_item_id:it.stockItemId||null, description:it.description,
+        hsn_code:it.hsnCode||null, qty:it.qty, rate:it.rate, discount_pct:it.discountPct||0, amount:it.amount, gst_rate:it.gstRate||0, gst_amount:it.gstAmount||0}));
+      const { error: iErr } = await sb.from("voucher_items").insert(rows);
+      if(iErr){ toast("Could not save items: " + iErr.message, true); return false; }
+      items.forEach((it,i)=> DB.voucherItems.push({id:rows[i].id, voucherId:voucher.id, ...it}));
+    }
+    return true;
+  }catch(e){ console.error(e); toast("Could not save: " + e.message, true); return false; }
+}
+
 // CRM → Books: when a lead is marked Won, offer to post a matching Sales
 // voucher so closed deals flow into the ledger instead of needing a second
 // manual entry. Finds or creates a Sundry Debtor account for the lead's
@@ -2103,6 +2147,38 @@ function incomeExpenseAccounts(nature){
   return DB.ledgerAccounts.filter(a=>a.nature===nature && !a.isParty);
 }
 
+function renderBooksGuide(){
+  return `
+  <details class="card" style="cursor:default;">
+    <summary style="cursor:pointer;font-weight:700;font-size:1.05em;">How Books works — start here if you're new</summary>
+    <div style="margin-top:12px;">
+      <p><b>Set up once, in this order:</b></p>
+      <ol style="margin:0 0 12px 20px; padding:0;">
+        <li><b>Chart of Accounts</b> — every ledger you'll ever post to: Cash/Bank (already there), each customer (Debtor) and vendor (Creditor), plus expense/income categories. Add a customer/vendor here <i>before</i> you can invoice them.</li>
+        <li><b>Stock Items</b> (optional) — the products/services you invoice against, with HSN code and GST %. Only needed if you want item-wise Sales/Purchase invoices (qty × rate); skip it if you only ever use Payment/Receipt/Journal for simple bank-style entries.</li>
+        <li><b>Settings → Company GST Registration</b> — set your own State once, so CGST+SGST vs IGST is computed automatically per invoice.</li>
+      </ol>
+      <p><b>Then, day to day, record what actually happened in Vouchers:</b></p>
+      <ul style="margin:0 0 12px 20px; padding:0;">
+        <li><b>Sales / Purchase</b> — you sold or bought something. Posts to the ledger immediately.</li>
+        <li><b>Credit Note / Debit Note</b> — reduces a Sales/Purchase bill after the fact (return, rate correction). Can be tied to the original bill.</li>
+        <li><b>Payment / Receipt</b> — money actually left or arrived (bank/cash). Settles what a customer/vendor owes, optionally against specific bills (Bill-wise Allocation).</li>
+        <li><b>Journal</b> — anything else: manual corrections, depreciation, adjustments across any accounts.</li>
+        <li><b>Contra</b> — moving money between your own Cash/Bank accounts (deposit, withdrawal).</li>
+        <li><b>Sales Order / Purchase Order / Delivery Note / Receipt Note</b> — reference-only tracking before the real invoice exists (no ledger impact). Use "Convert to Invoice" on the Day Book row once it's actually billed.</li>
+      </ul>
+      <p><b>Then use these to see where you stand:</b></p>
+      <ul style="margin:0; padding:0 0 0 20px;">
+        <li><b>Party Ledgers</b> — what a specific customer/vendor owes, aging, and which bills are still open.</li>
+        <li><b>GST Summary</b> — HSN-wise tax totals for a filing period.</li>
+        <li><b>Trial Balance</b> — sanity check that everything still balances.</li>
+        <li><b>Profit &amp; Loss</b> — income vs expense for a period.</li>
+        <li><b>Balance Sheet</b> — what the business owns vs owes, as of a date.</li>
+      </ul>
+    </div>
+  </details>`;
+}
+
 function renderBooks(){
   const views = [["vouchers","Vouchers"],["items","Stock Items"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
   const nav = `<div class="row" style="margin-bottom:14px;">${views.map(([k,l])=>
@@ -2118,7 +2194,7 @@ function renderBooks(){
   else if(booksView==="balance") body = renderBalanceSheet();
   else body = renderVouchersView();
 
-  return nav + body;
+  return renderBooksGuide() + nav + body;
 }
 
 // ---- Stock Items (item master for item-wise invoicing — no stock-on-hand/valuation tracking) ----
@@ -2244,7 +2320,9 @@ function renderChartOfAccounts(){
 // ---- Vouchers (entry + Day Book) ----
 function renderVouchersView(){
   if(!booksDayRange){ const r = quickRange("month"); booksDayRange = {from:r.from, to:r.to}; }
-  const types = [["Sales","Sales"],["Purchase","Purchase"],["CreditNote","Credit Note"],["DebitNote","Debit Note"],["Payment","Payment"],["Receipt","Receipt"],["Journal","Journal"],["Contra","Contra"]];
+  const types = [["Sales","Sales"],["Purchase","Purchase"],["CreditNote","Credit Note"],["DebitNote","Debit Note"],
+    ["Payment","Payment"],["Receipt","Receipt"],["Journal","Journal"],["Contra","Contra"],
+    ["SalesOrder","Sales Order"],["PurchaseOrder","Purchase Order"],["DeliveryNote","Delivery Note"],["ReceiptNote","Receipt Note"]];
 
   let form;
   if(voucherType==="Sales") form = voucherFormSalesPurchase("Sales");
@@ -2254,29 +2332,38 @@ function renderVouchersView(){
   else if(voucherType==="Payment") form = voucherFormPaymentReceipt("Payment");
   else if(voucherType==="Receipt") form = voucherFormPaymentReceipt("Receipt");
   else if(voucherType==="Contra") form = voucherFormContra();
+  else if(NON_ACCOUNTING_VOUCHER_TYPES.includes(voucherType)) form = voucherFormOrderNote(voucherType);
   else form = voucherFormJournal();
 
   const dayRows = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
     .sort((a,b)=>b.date.localeCompare(a.date)).map(v=>{
       const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
-      const total = lines.reduce((a,l)=>a+(l.debit||0),0);
       const items = DB.voucherItems.filter(i=>i.voucherId===v.id);
+      const isNonAcct = NON_ACCOUNTING_VOUCHER_TYPES.includes(v.voucherType);
+      const total = isNonAcct ? items.reduce((a,i)=>a+(i.amount||0)+(i.gstAmount||0),0) : lines.reduce((a,l)=>a+(l.debit||0),0);
       const itemsTitle = items.length ? items.map(i=>`${i.description} — ${i.qty} x ₹${fmt0(i.rate)} (${i.gstRate}% GST) = ₹${fmt0(i.amount+i.gstAmount)}`).join("\n") : "";
+      const canConvert = isNonAcct && items.length && v.partyId;
       return `<tr data-id="${v.id}">
-        <td>${v.date}</td><td>${v.voucherNo}</td><td>${voucherTypeLabel(v.voucherType)}</td>
+        <td>${v.date}</td><td>${v.voucherNo}</td>
+        <td>${voucherTypeLabel(v.voucherType)}${isNonAcct?' <span class="helptext">(non-accounting)</span>':''}</td>
         <td>${v.partyId?accName(v.partyId):''}</td>
         <td${itemsTitle?` title="${escapeHtml(itemsTitle)}"`:''}>${v.narration||''}${items.length?` <span class="helptext">(${items.length} item${items.length>1?'s':''} — hover for details)</span>`:''}</td>
         <td class="num">${fmt(total)}</td>
-        <td><button class="btn danger sm delVoucherBtn">Delete</button></td>
+        <td class="actions">
+          ${canConvert ? `<button class="btn ghost sm convertToInvoiceBtn">Convert to Invoice</button>` : ''}
+          <button class="btn danger sm delVoucherBtn">Delete</button>
+        </td>
       </tr>`;
     }).join("");
 
   return `
   <div class="card">
     <h2>New Voucher</h2>
-    <div class="row" style="margin-bottom:10px;">
-      ${types.map(([t,l])=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}">${l}</button>`).join("")}
+    <div class="sub">Pick the voucher type that matches what actually happened. Not sure which? Hover over a type below, or see the one-line guide under the buttons.</div>
+    <div class="row" style="margin-bottom:6px;">
+      ${types.map(([t,l])=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}" title="${escapeHtml(VOUCHER_TYPE_HELP[t]||'')}">${l}</button>`).join("")}
     </div>
+    <p class="helptext" style="margin-bottom:14px;">${escapeHtml(VOUCHER_TYPE_HELP[voucherType]||'')}</p>
     ${form}
   </div>
   <div class="card">
@@ -2519,6 +2606,62 @@ function voucherFormCreditDebitNote(type){
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${isCredit?'Credit':'Debit'} Note</button>`;
 }
 
+// Sales/Purchase Order and Delivery/Receipt Note — reference-tracking
+// documents only, no ledger postings. Shares voucherSalesPartyId/
+// voucherItemRows with Sales/Purchase/Credit/Debit Note. A "Convert to
+// Invoice" button on the Day Book row copies party+items into a fresh
+// Sales/Purchase voucher once the order is actually fulfilled/billed.
+function voucherFormOrderNote(type){
+  const isSalesSide = type==="SalesOrder" || type==="DeliveryNote";
+  const partyList = parties(isSalesSide?"Debtor":"Creditor");
+  if(voucherSalesPartyId===null) voucherSalesPartyId = partyList.length ? partyList[0].id : "";
+
+  const taxableValue = round2(voucherItemRows.reduce((s,r)=>s+voucherItemRowAmount(r),0));
+  const gstTotal = round2(voucherItemRows.reduce((s,r)=>{
+    const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+    return s + voucherItemRowAmount(r) * (item ? item.gstRate : 0)/100;
+  },0));
+  const grandTotal = round2(taxableValue + gstTotal);
+
+  const itemRowsHtml = voucherItemRows.map((r,i)=>{
+    const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+    return `<tr>
+      <td><select class="viItem" data-i="${i}">${DB.stockItems.length ? `<option value="">— select item —</option>` + DB.stockItems.map(x=>`<option value="${x.id}" ${x.id===r.stockItemId?'selected':''}>${escapeHtml(x.name)}</option>`).join("") : `<option value="">— add one in Books → Stock Items first —</option>`}</select></td>
+      <td>${item ? escapeHtml(item.hsnCode||'—') : '—'}</td>
+      <td><input type="number" class="viQty" data-i="${i}" value="${r.qty}" min="0" style="width:80px;"></td>
+      <td><input type="number" class="viRate" data-i="${i}" value="${r.rate}" min="0" style="width:100px;"></td>
+      <td><input type="number" class="viDisc" data-i="${i}" value="${r.discountPct||0}" min="0" max="100" style="width:70px;"></td>
+      <td class="num">${fmt(voucherItemRowAmount(r))}</td>
+      <td>${item ? item.gstRate+'%' : '—'}</td>
+      <td><button type="button" class="btn danger sm viRemoveBtn" data-i="${i}">Remove</button></td>
+    </tr>`;
+  }).join("");
+
+  return `
+    <div class="grid grid-4">
+      <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>${isSalesSide?"Customer":"Vendor"}</label>
+        <select id="v_party">${partyList.map(p=>`<option value="${p.id}" ${p.id===voucherSalesPartyId?'selected':''}>${p.name}</option>`).join("") || `<option value="">— add one in Chart of Accounts first —</option>`}</select>
+      </div>
+      <div class="field"><label>Reference No. (optional)</label><input id="v_reference" placeholder="e.g. their PO number"></div>
+      <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
+    </div>
+    <div class="section-title">Items</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Item</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc %</th><th>Amount</th><th>GST %</th><th></th></tr></thead>
+        <tbody>${itemRowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="row"><button type="button" class="btn ghost sm" id="viAddRowBtn">+ Add Item</button></div>
+    <div class="grid grid-4" style="margin-top:12px;">
+      <div class="field"><label>Taxable Value</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
+      <div class="field"><label>Est. GST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(gstTotal)}</div></div>
+      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(grandTotal)}</div></div>
+    </div>
+    <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${voucherTypeLabel(type)}</button>`;
+}
+
 // Which party/account is currently selected in the Payment/Receipt form's
 // "Pay To"/"Receive From" dropdown, and the draft bill-wise allocation
 // amounts keyed by bill voucher id — both persisted across re-renders
@@ -2663,16 +2806,19 @@ function renderPartyLedgers(){
   return `
   <div class="card">
     <h2>Sundry Debtors (Customers who owe you)</h2>
+    <div class="sub">Every account marked as a Debtor in Chart of Accounts. Balance is what they currently owe; the four columns split that by how long it's been outstanding (aging), so you can spot overdue customers at a glance.</div>
     <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${debtors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet.</td></tr>`}</tbody></table></div>
+    <tbody>${debtors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet — add one in Chart of Accounts and mark it as a Debtor.</td></tr>`}</tbody></table></div>
   </div>
   <div class="card">
     <h2>Sundry Creditors (Vendors you owe)</h2>
+    <div class="sub">Every account marked as a Creditor in Chart of Accounts, with the same aging breakdown for what you owe them.</div>
     <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${creditors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet.</td></tr>`}</tbody></table></div>
+    <tbody>${creditors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet — add one in Chart of Accounts and mark it as a Creditor.</td></tr>`}</tbody></table></div>
   </div>
   <div class="card">
     <h2>View a Party's Full Ledger</h2>
+    <div class="sub">Pick a customer or vendor to see every transaction against them — including which bill each payment/note settled ("Agst Ref") — plus a breakdown of their still-open bills below.</div>
     <div class="row"><select id="partySelect" style="max-width:280px;"><option value="">Select a party…</option>${partyOptions}</select></div>
   </div>
   ${detail}`;
@@ -2758,6 +2904,7 @@ function renderTrialBalance(){
   return `
   <div class="card">
     <h2>Trial Balance</h2>
+    <div class="sub">Every account's Dr or Cr balance as of a date — the standard first check that your books are internally consistent (total Debit must equal total Credit). If this ever shows "Not Balanced," something was written directly to the database outside the app.</div>
     <div class="row"><div class="field" style="max-width:180px;"><label>As of</label><input type="date" id="tb_asof" value="${booksAsOf}"></div>
       <button class="btn ghost" id="loadTrialBtn">Apply</button></div>
     <div class="tablewrap">
@@ -2785,6 +2932,7 @@ function renderBooksPnl(){
   return `
   <div class="card">
     <h2>Profit &amp; Loss</h2>
+    <div class="sub">All Income minus all Expense accounts for a date range — what the business actually earned or lost in that period. Feeds the Balance Sheet's Equity as retained earnings.</div>
     <div class="row">
       <div class="field" style="max-width:160px;"><label>From</label><input type="date" id="pnl_from" value="${booksPnlRange.from}"></div>
       <div class="field" style="max-width:160px;"><label>To</label><input type="date" id="pnl_to" value="${booksPnlRange.to}"></div>
@@ -2819,6 +2967,7 @@ function renderBalanceSheet(){
   return `
   <div class="card">
     <h2>Balance Sheet</h2>
+    <div class="sub">A snapshot as of one date: what the business owns (Assets) against what it owes and what's owed to owners (Liabilities + Equity, including retained profit/loss to date). These two sides always match — that's what "balances" means.</div>
     <div class="row"><div class="field" style="max-width:180px;"><label>As of</label><input type="date" id="bs_asof" value="${booksAsOf}"></div>
       <button class="btn ghost" id="loadBalanceBtn">Apply</button></div>
     <div class="grid grid-2">
@@ -4931,6 +5080,21 @@ function attachHandlers(){
         await deleteVoucher(id);
         renderAll();
       });
+      document.querySelectorAll(".convertToInvoiceBtn").forEach(b=>b.onclick=(e)=>{
+        const srcId = e.target.closest("tr").dataset.id;
+        const src = DB.vouchers.find(v=>v.id===srcId);
+        if(!src) return;
+        const isSalesSide = src.voucherType==="SalesOrder" || src.voucherType==="DeliveryNote";
+        voucherType = isSalesSide ? "Sales" : "Purchase";
+        voucherSalesPartyId = src.partyId;
+        voucherItemRows = DB.voucherItems.filter(i=>i.voucherId===srcId)
+          .map(i=>({stockItemId:i.stockItemId||"", qty:i.qty, rate:i.rate, discountPct:i.discountPct||0}));
+        if(!voucherItemRows.length) voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
+        paymentBillAllocDraft = {};
+        toast(`Loaded ${voucherTypeLabel(src.voucherType)} ${src.voucherNo} into a new ${isSalesSide?'Sales':'Purchase'} voucher — review and Save.`);
+        renderAll();
+        window.scrollTo({top:0, behavior:"smooth"});
+      });
 
       if(voucherType==="Payment" || voucherType==="Receipt"){
         const targetSel = document.getElementById("v_target");
@@ -4957,7 +5121,7 @@ function attachHandlers(){
         if(clearAllocBtn) clearAllocBtn.onclick = ()=>{ paymentBillAllocDraft = {}; renderAll(); };
       }
 
-      if(voucherType==="Sales" || voucherType==="Purchase" || voucherType==="CreditNote" || voucherType==="DebitNote"){
+      if(voucherType==="Sales" || voucherType==="Purchase" || voucherType==="CreditNote" || voucherType==="DebitNote" || NON_ACCOUNTING_VOUCHER_TYPES.includes(voucherType)){
         const partySel = document.getElementById("v_party");
         if(partySel) partySel.onchange = (e)=>{ voucherSalesPartyId = e.target.value; paymentBillAllocDraft = {}; renderAll(); };
         document.getElementById("viAddRowBtn").onclick = ()=>{
@@ -5174,21 +5338,39 @@ function attachHandlers(){
           voucher = {id:newId("VCH"), voucherType:"Journal", voucherNo:nextVoucherNo("Journal"), date, partyId:null, narration};
           lines = journalRows.filter(r=>r.account && ((r.debit||0)>0 || (r.credit||0)>0))
             .map(r=>({accountId:r.account, debit:parseFloat(r.debit)||0, credit:parseFloat(r.credit)||0}));
+        } else if(NON_ACCOUNTING_VOUCHER_TYPES.includes(kind)){
+          const partyId = val("v_party");
+          if(!partyId){ toast("Choose a party.", true); return; }
+          const validRows = voucherItemRows.filter(r=>r.stockItemId && voucherItemRowAmount(r)>0);
+          if(!validRows.length){ toast("Add at least one item with a stock item, quantity, and rate.", true); return; }
+          const reference = val("v_reference").trim();
+          voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date, partyId, narration, reference};
+          voucher._items = validRows.map(r=>{
+            const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+            const amount = voucherItemRowAmount(r);
+            return { stockItemId:r.stockItemId, description:item?item.name:"", hsnCode:item?item.hsnCode:"",
+              qty:r.qty, rate:r.rate, discountPct:r.discountPct||0, amount,
+              gstRate:item?item.gstRate:0, gstAmount:round2(amount*(item?item.gstRate:0)/100) };
+          });
+          voucher._nonAccounting = true;
         }
 
         const billAllocs = voucher._billAllocs; delete voucher._billAllocs;
         const items = voucher._items; delete voucher._items;
-        const ok = await saveVoucher(voucher, lines);
+        const nonAccounting = voucher._nonAccounting; delete voucher._nonAccounting;
+        const ok = nonAccounting ? await saveNonAccountingVoucher(voucher, items) : await saveVoucher(voucher, lines);
         if(ok){
-          if(billAllocs && billAllocs.length){
-            billAllocs.forEach(a=> DB.billAllocations.push({id:newId("BA"), voucherId:voucher.id, billVoucherId:a.billVoucherId, amount:a.amount}));
-            await save("billAllocations");
+          if(!nonAccounting){
+            if(billAllocs && billAllocs.length){
+              billAllocs.forEach(a=> DB.billAllocations.push({id:newId("BA"), voucherId:voucher.id, billVoucherId:a.billVoucherId, amount:a.amount}));
+              await save("billAllocations");
+            }
+            if(items && items.length){
+              items.forEach(it=> DB.voucherItems.push({id:newId("VI"), voucherId:voucher.id, ...it}));
+              await save("voucherItems");
+            }
           }
-          if(items && items.length){
-            items.forEach(it=> DB.voucherItems.push({id:newId("VI"), voucherId:voucher.id, ...it}));
-            await save("voucherItems");
-          }
-          toast(kind + " voucher saved.");
+          toast(voucherTypeLabel(kind) + " saved.");
           if(kind==="Journal") journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
           voucherPayRecTarget = null; paymentBillAllocDraft = {};
           voucherSalesPartyId = null; voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
