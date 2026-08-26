@@ -51,6 +51,7 @@
   .shortcuts-table td{padding:6px 4px;border-bottom:1px solid var(--line);font-size:13px;}
   .shortcuts-table td:first-child{white-space:nowrap;width:1%;}
   kbd{display:inline-block;background:#F0F2F6;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 6px;font-family:inherit;font-size:11.5px;color:var(--navy);font-weight:600;}
+  .hotkey-tag{display:inline-block;opacity:.7;font-size:10px;font-weight:400;border:1px solid currentColor;border-radius:3px;padding:0 4px;vertical-align:1px;}
   main{padding:18px;max-width:1300px;margin:0 auto;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:0 1px 2px rgba(20,25,50,.04);}
   .card h2{margin:0 0 4px;font-size:16px;}
@@ -1631,7 +1632,7 @@ function renderEmployees(){
     ${renderPager("employees", page, totalPages, total)}
   </div>
   <div class="card">
-    <h2 id="empFormTitle">Add Employee</h2>
+    <h2 id="empFormTitle">Add Employee <span class="hotkey-tag">Alt+C</span></h2>
     <input type="hidden" id="empEditingId" value="">
     <div class="form-tabs">
       <button type="button" class="form-tab-btn active" data-tab="overview">Overview</button>
@@ -2226,6 +2227,7 @@ const VOUCHER_TYPE_HELP = {
   DeliveryNote: "Records goods sent to a customer ahead of invoicing (e.g. dispatch before billing) - no ledger impact. \"Convert to Invoice\" to bill it.",
   ReceiptNote: "Records goods received from a vendor ahead of their invoice - no ledger impact. \"Convert to Invoice\" once billed."
 };
+const VOUCHER_TYPE_HOTKEY = {Contra:"F4", Payment:"F5", Receipt:"F6", Journal:"F7", Sales:"F8", CreditNote:"Ctrl+F8", Purchase:"F9", DebitNote:"Ctrl+F9"};
 
 function normalSign(nature){ return (nature==="Asset"||nature==="Expense") ? 1 : -1; }
 function accName(id){ const a = DB.ledgerAccounts.find(x=>x.id===id); return a ? a.name : id; }
@@ -2784,7 +2786,7 @@ function renderStockItems(){
         <tbody>${rows || `<tr><td colspan="7" class="empty">No items yet.</td></tr>`}</tbody>
       </table>
     </div>
-    <div class="section-title">${editing ? `Edit Item - ${escapeHtml(editing.name)}` : 'Add Item'}</div>
+    <div class="section-title">${editing ? `Edit Item - ${escapeHtml(editing.name)}` : `Add Item <span class="hotkey-tag">Alt+C</span>`}</div>
     <input type="hidden" id="itemEditingId" value="${itemEditingId||''}">
     <div class="grid grid-4">
       <div class="field"><label>Name</label><input id="item_name" placeholder="e.g. Vextron SS10X" value="${editing?escapeHtml(editing.name):''}"></div>
@@ -2831,7 +2833,7 @@ function renderChartOfAccounts(){
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div class="section-title">${editing ? `Edit Account - ${escapeHtml(editing.name)}` : 'Add Account'}</div>
+    <div class="section-title">${editing ? `Edit Account - ${escapeHtml(editing.name)}` : `Add Account <span class="hotkey-tag">Alt+C</span>`}</div>
     <input type="hidden" id="accEditingId" value="${accEditingId||''}">
     <div class="grid grid-4">
       <div class="field"><label>Name</label><input id="acc_name" placeholder="e.g. Electricity Expense" value="${editing?escapeHtml(editing.name):''}"></div>
@@ -2945,7 +2947,7 @@ function renderVouchersView(){
     ${voucherEditingId ? `<p class="helptext">Editing ${voucherTypeLabel(voucherType)} ${(DB.vouchers.find(v=>v.id===voucherEditingId)||{}).voucherNo||''} - Save updates it in place (same voucher number). <button type="button" class="btn ghost sm" id="cancelVoucherEditBtn">Cancel, start new instead</button></p>`
       : `<div class="sub">Pick the voucher type that matches what actually happened. Not sure which? Hover over a type below, or see the one-line guide under the buttons.</div>
     <div class="row" style="margin-bottom:6px;">
-      ${types.map(([t,l])=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}" title="${escapeHtml(VOUCHER_TYPE_HELP[t]||'')}">${l}</button>`).join("")}
+      ${types.map(([t,l])=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}" title="${escapeHtml(VOUCHER_TYPE_HELP[t]||'')}">${VOUCHER_TYPE_HOTKEY[t]?`<span class="hotkey-tag">${VOUCHER_TYPE_HOTKEY[t]}</span> `:''}${l}</button>`).join("")}
     </div>
     <p class="helptext" style="margin-bottom:14px;">${escapeHtml(VOUCHER_TYPE_HELP[voucherType]||'')}</p>`}
     ${form}
@@ -4767,7 +4769,7 @@ function renderCRM(){
       </table>
     </div>
     ${renderPager("leads", ldPage, ldTotalPages, ldTotal)}
-    <div class="section-title" id="ldFormTitle">Add Lead</div>
+    <div class="section-title" id="ldFormTitle">Add Lead <span class="hotkey-tag">Alt+C</span></div>
     <input type="hidden" id="ld_editing_id" value="">
     <div class="grid grid-4">
       <div class="field"><label>Name</label><input id="ld_name" placeholder="Contact name"></div>
