@@ -294,6 +294,23 @@ function payslipSignatureVisible(emp){
   return DB.settings.showSignatureOnPayslip !== false;
 }
 
+// Seeded onto every new employee's details.onboarding at creation time (see
+// saveEmpBtn). Independently editable per employee after that - not a
+// company-wide template, just a sensible starting checklist.
+const DEFAULT_ONBOARDING_CHECKLIST = [
+  "Offer Letter Sent", "Appointment Letter Signed", "PAN/Aadhar Collected",
+  "Bank Details Collected", "Salary Structure Set", "Fingerprint Enrolled",
+  "Email/Access Setup", "Induction Completed"
+];
+function newOnboardingChecklist(){
+  return DEFAULT_ONBOARDING_CHECKLIST.map(task=>({id:newId("OB"), task, done:false, date:null}));
+}
+function onboardingProgress(emp){
+  const list = (emp && emp.details && emp.details.onboarding) || [];
+  const done = list.filter(t=>t.done).length;
+  return { done, total:list.length, complete: list.length>0 && done===list.length };
+}
+
 const SEED_EMPLOYEES = [
   {id:"AZ001",name:"Shivraj",doj:"2026-06-22",status:"Active",basic:7500,hra:3000,other:4500},
   {id:"AZ002",name:"Viswajeet",doj:"2026-06-22",status:"Active",basic:7500,hra:3000,other:4500},
@@ -326,8 +343,8 @@ const SEED_PAYROLL = [
 // ============================= TABLE MAPPINGS (JS <-> Postgres) =============================
 const TABLE_CONFIG = {
   employees:    { table:"employees",
-    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null,is_remote:!!e.isRemote,signature_override:e.signatureOverride||null}),
-    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||'',isRemote:!!r.is_remote,signatureOverride:r.signature_override||''}) },
+    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null,is_remote:!!e.isRemote,signature_override:e.signatureOverride||null,details:e.details||{}}),
+    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||'',isRemote:!!r.is_remote,signatureOverride:r.signature_override||'',details:r.details||{}}) },
   payroll:      { table:"payroll",
     toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds,lop_hours:p.lopHours||0,
       quality:(p.quality===null||p.quality===undefined)?null:p.quality,
@@ -1386,6 +1403,7 @@ function renderEmployees(){
     const basic = struct ? struct.basic : (e.basic||0);
     const hra = struct ? struct.hra : (e.hra||0);
     const other = struct ? (struct.components||[]).reduce((a,c)=>a+c.amount,0) : (e.other||0);
+    const ob = onboardingProgress(e);
     return `
     <tr data-id="${e.id}">
       <td><input type="checkbox" class="rowCheck empCheck" data-id="${e.id}" ${selectedEmployeeIds.has(e.id)?'checked':''}></td>
@@ -1395,7 +1413,8 @@ function renderEmployees(){
       <td class="hide-tablet">${e.dob||'-'}</td>
       <td>${e.email||'-'}</td>
       <td class="hide-tablet">${e.resignDate||'-'}</td>
-      <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span>${e.isRemote?' <span class="pill ok">WFH</span>':''}</td>
+      <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span>${e.isRemote?' <span class="pill ok">WFH</span>':''}
+        ${ob.total ? `<span class="pill ${ob.complete?'ok':'warn'}" title="Onboarding checklist">${ob.done}/${ob.total}</span>` : ''}</td>
       <td class="num hide-tablet">${fmt0(basic)}</td>
       <td class="num hide-tablet">${fmt0(hra)}</td>
       <td class="num hide-tablet">${fmt0(other)}</td>
@@ -1403,6 +1422,7 @@ function renderEmployees(){
       <td class="actions">
         <button class="btn ghost sm editEmpBtn">Edit</button>
         <button class="btn ghost sm salStructBtn">Salary</button>
+        <button class="btn ghost sm onboardBtn">Onboarding</button>
         <button class="btn danger sm delEmpBtn">Delete</button>
       </td>
     </tr>`;}).join("");
@@ -1451,12 +1471,29 @@ function renderEmployees(){
       <div class="field"><label>Starting HRA (₹)</label><input type="number" id="f_hra" value="0"></div>
       <div class="field"><label>Starting Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
     </div>
+    <div class="section-title">Additional Details</div>
+    <div class="grid grid-4">
+      <div class="field"><label>PAN</label><input id="f_pan"></div>
+      <div class="field"><label>Aadhar</label><input id="f_aadhar"></div>
+      <div class="field" style="grid-column:span 2;"><label>Address</label><input id="f_address"></div>
+      <div class="field"><label>Emergency Contact Name</label><input id="f_emergencyName"></div>
+      <div class="field"><label>Emergency Contact Phone</label><input id="f_emergencyPhone"></div>
+    </div>
+    <div class="section-title">Bank Details (for payroll)</div>
+    <div class="grid grid-4">
+      <div class="field"><label>A/c Holder's Name</label><input id="f_bankHolder"></div>
+      <div class="field"><label>A/c No.</label><input id="f_bankAccNo"></div>
+      <div class="field"><label>IFSC</label><input id="f_ifsc"></div>
+      <div class="field"><label>Bank Name</label><input id="f_bankName"></div>
+    </div>
     <div class="row">
       <button class="btn gold" id="saveEmpBtn">Save Employee</button>
       <button class="btn ghost" id="cancelEmpBtn" style="display:none;">Cancel Edit</button>
     </div>
   </div>
-  ${renderSalaryStructureCard()}`;
+  ${renderSalaryStructureCard()}
+  ${renderOnboardingCard()}
+  ${renderOfferLetterCard()}`;
 }
 
 // ============================= SALARY STRUCTURE =============================
@@ -1605,6 +1642,125 @@ function renderSalaryStructureCard(){
 
     <h3>Revision History</h3>
     ${historyHtml}
+  </div>`;
+}
+
+// ============================= ONBOARDING =============================
+let onboardEmpId = null;
+let newOnboardTaskDraft = "";
+
+function renderOnboardingCard(){
+  if(!DB.employees.length) return "";
+  if(!onboardEmpId || !DB.employees.some(e=>e.id===onboardEmpId)) onboardEmpId = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id))[0].id;
+  const emp = DB.employees.find(e=>e.id===onboardEmpId);
+  const list = (emp.details && emp.details.onboarding) || [];
+  const prog = onboardingProgress(emp);
+
+  const rows = list.map(t=>`
+    <tr data-id="${t.id}">
+      <td><input type="checkbox" class="obTaskCheck" data-id="${t.id}" ${t.done?'checked':''}></td>
+      <td>${escapeHtml(t.task)}</td>
+      <td>${t.date||''}</td>
+      <td><button type="button" class="btn danger sm obTaskRemoveBtn" data-id="${t.id}">Remove</button></td>
+    </tr>`).join("");
+
+  return `
+  <div class="card">
+    <h2>Onboarding Checklist</h2>
+    <div class="sub">A tracked task list per new hire - ticked off as HR completes each step. Auto-seeded with a default checklist when an employee is created; add or remove tasks freely per employee after that.</div>
+    <div class="field" style="max-width:320px;"><label>Employee</label>
+      <select id="onboardEmpSelect">${DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(e=>`<option value="${e.id}" ${e.id===onboardEmpId?'selected':''}>${e.id} - ${e.name}</option>`).join("")}</select>
+    </div>
+    <h3>${escapeHtml(emp.name)} - ${prog.done}/${prog.total} complete${prog.complete?' <span class="pill ok">Onboarded</span>':''}</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Done</th><th>Task</th><th>Completed On</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="4" class="empty">No checklist yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="row">
+      <div class="field" style="margin:0;max-width:320px;"><input type="text" id="newOnboardTaskInput" placeholder="Add a custom task" value="${escapeHtml(newOnboardTaskDraft)}"></div>
+      <button type="button" class="btn ghost sm" id="addOnboardTaskBtn">+ Add Task</button>
+    </div>
+  </div>`;
+}
+
+// ============================= OFFER / APPOINTMENT LETTER =============================
+let letterEmpId = null;
+let letterType = "Offer";
+let letterDesignation = "";
+let letterReportingManager = SIGNATORY_NAME;
+let letterStartDate = null;
+
+function letterBodyText(type, emp, ctc){
+  const company = "Auzentis Private Limited";
+  const designation = letterDesignation || "the offered position";
+  const startDate = letterStartDate || emp.doj;
+  if(type==="Offer"){
+    return `Dear ${emp.name},<br><br>
+      We are pleased to offer you the position of <b>${escapeHtml(designation)}</b> at ${company}. This letter confirms our offer of employment on the following terms:<br><br>
+      <b>Position:</b> ${escapeHtml(designation)}<br>
+      <b>Reporting To:</b> ${escapeHtml(letterReportingManager)}<br>
+      <b>Start Date:</b> ${startDate}<br>
+      <b>Annual CTC:</b> ₹${fmt0(ctc)}<br><br>
+      We are excited about the prospect of you joining our team and contributing to ${company}'s continued growth. Please confirm your acceptance of this offer by signing and returning a copy of this letter.<br><br>
+      We look forward to welcoming you on board.`;
+  }
+  return `Dear ${emp.name},<br><br>
+    Further to your acceptance of our offer, we are pleased to confirm your appointment as <b>${escapeHtml(designation)}</b> at ${company}, effective <b>${startDate}</b>.<br><br>
+    <b>Position:</b> ${escapeHtml(designation)}<br>
+    <b>Reporting To:</b> ${escapeHtml(letterReportingManager)}<br>
+    <b>Date of Joining:</b> ${startDate}<br>
+    <b>Annual CTC:</b> ₹${fmt0(ctc)}<br><br>
+    Your employment will be governed by the Company's policies as communicated to you from time to time. We are delighted to have you as part of the ${company} team and look forward to a mutually rewarding association.`;
+}
+
+function renderOfferLetterCard(){
+  if(!DB.employees.length) return "";
+  if(!letterEmpId || !DB.employees.some(e=>e.id===letterEmpId)) letterEmpId = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id))[0].id;
+  if(!letterStartDate) letterStartDate = new Date().toISOString().slice(0,10);
+  const emp = DB.employees.find(e=>e.id===letterEmpId);
+  const struct = currentStructureFor(emp.id);
+  const monthlyCtc = struct ? (struct.basic+struct.hra+(struct.components||[]).reduce((a,c)=>a+c.amount,0)) : (emp.basic+emp.hra+emp.other);
+  const annualCtc = round2(monthlyCtc*12);
+
+  return `
+  <div class="card">
+    <h2>Offer / Appointment Letter</h2>
+    <div class="sub">Generates a signed PDF using the same signature/stamp as payslips. CTC is pulled from the employee's current Salary Structure (₹${fmt0(monthlyCtc)}/month × 12).</div>
+    <div class="grid grid-4">
+      <div class="field"><label>Employee</label>
+        <select id="letterEmpSelect">${DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id)).map(e=>`<option value="${e.id}" ${e.id===letterEmpId?'selected':''}>${e.id} - ${e.name}</option>`).join("")}</select>
+      </div>
+      <div class="field"><label>Letter Type</label>
+        <select id="letterTypeSelect"><option value="Offer" ${letterType==='Offer'?'selected':''}>Offer Letter</option><option value="Appointment" ${letterType==='Appointment'?'selected':''}>Appointment Letter</option></select>
+      </div>
+      <div class="field"><label>Designation</label><input type="text" id="letterDesignationInput" value="${escapeHtml(letterDesignation)}" placeholder="e.g. Executive"></div>
+      <div class="field"><label>Reporting Manager</label><input type="text" id="letterManagerInput" value="${escapeHtml(letterReportingManager)}"></div>
+      <div class="field"><label>${letterType==='Offer'?'Proposed':'Effective'} Start Date</label><input type="date" id="letterStartDateInput" value="${letterStartDate}"></div>
+    </div>
+    <button class="btn gold" id="generateLetterBtn">Generate PDF</button>
+    <div id="letterPrintArea" class="payslip" style="margin-top:20px;">
+      <div class="head">
+        <div class="brand-row"><img class="mark" src="${LOGO_MARK}" alt="Auzentis"><img class="wordmark" src="${LOGO_WORDMARK}" alt="Auzentis"></div>
+        <div class="head-sub"><span class="tag">${letterType.toUpperCase()} LETTER</span><span class="period">${new Date().toISOString().slice(0,10)}</span></div>
+      </div>
+      <div class="body" style="line-height:1.7;font-size:13px;">
+        ${letterBodyText(letterType, emp, annualCtc)}
+        ${(SIGNATURE_IMG || STAMP_IMG) ? `
+        <div style="display:flex;justify-content:flex-end;align-items:flex-end;gap:16px;margin-top:36px;">
+          ${STAMP_IMG ? `<img src="${STAMP_IMG}" style="height:80px;width:auto;" alt="Company Stamp">` : ''}
+          ${SIGNATURE_IMG ? `<div style="text-align:center;">
+            <img src="${SIGNATURE_IMG}" style="height:50px;width:auto;display:block;" alt="Signature">
+            <div style="font-size:11px;color:var(--muted);border-top:1px solid var(--line);margin-top:2px;padding-top:2px;">${SIGNATORY_NAME}<br>Director</div>
+          </div>` : ''}
+        </div>` : ''}
+      </div>
+      <div class="foot">
+        <div class="co-line">Auzentis Private Limited</div>
+        <div>www.auzentis.com</div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -4902,6 +5058,16 @@ function attachHandlers(){
       document.getElementById("f_other").value = emp.other;
       document.getElementById("salaryFieldsGroup").style.display = "none";
       document.getElementById("salaryFieldsNote").style.display = "block";
+      const d = emp.details || {};
+      document.getElementById("f_pan").value = d.pan||"";
+      document.getElementById("f_aadhar").value = d.aadhar||"";
+      document.getElementById("f_address").value = d.address||"";
+      document.getElementById("f_emergencyName").value = d.emergencyContactName||"";
+      document.getElementById("f_emergencyPhone").value = d.emergencyContactPhone||"";
+      document.getElementById("f_bankHolder").value = d.bankAccountName||"";
+      document.getElementById("f_bankAccNo").value = d.bankAccountNo||"";
+      document.getElementById("f_ifsc").value = d.ifsc||"";
+      document.getElementById("f_bankName").value = d.bankName||"";
       document.getElementById("cancelEmpBtn").style.display = "inline-block";
       window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"});
     });
@@ -4911,6 +5077,12 @@ function attachHandlers(){
       resetSalStructDraft();
       renderAll();
       const sel = document.getElementById("salStructEmpSelect");
+      if(sel) sel.scrollIntoView({behavior:"smooth", block:"center"});
+    });
+    document.querySelectorAll(".onboardBtn").forEach(b=>b.onclick=(e)=>{
+      onboardEmpId = e.target.closest("tr").dataset.id;
+      renderAll();
+      const sel = document.getElementById("onboardEmpSelect");
       if(sel) sel.scrollIntoView({behavior:"smooth", block:"center"});
     });
     document.querySelectorAll(".delEmpBtn").forEach(b=>b.onclick=async (e)=>{
@@ -4934,15 +5106,24 @@ function attachHandlers(){
       if(basic<0 || hra<0 || other<0){ toast("Basic, HRA, and Other Allowance cannot be negative.", true); return; }
       const doj = val("f_doj") || "2026-01-01", resignDate = val("f_resign") || "";
       if(resignDate && resignDate < doj){ toast("Resigning Date cannot be before Date of Joining.", true); return; }
+      const existingEmp = editingId ? DB.employees.find(x=>x.id===editingId) : null;
+      const details = {
+        ...(existingEmp ? existingEmp.details : {}), // preserves onboarding checklist - this form never touches it
+        pan: val("f_pan").trim(), aadhar: val("f_aadhar").trim(), address: val("f_address").trim(),
+        emergencyContactName: val("f_emergencyName").trim(), emergencyContactPhone: val("f_emergencyPhone").trim(),
+        bankAccountName: val("f_bankHolder").trim(), bankAccountNo: val("f_bankAccNo").trim(),
+        ifsc: val("f_ifsc").trim(), bankName: val("f_bankName").trim(),
+      };
       const record = {
         id, name, doj, status: val("f_status"),
         dob: val("f_dob") || "", email: val("f_email").trim() || "", resignDate,
-        basic, hra, other, isRemote: val("f_remote")==="1", signatureOverride: val("f_signature")
+        basic, hra, other, isRemote: val("f_remote")==="1", signatureOverride: val("f_signature"), details
       };
       if(editingId){
         const idx = DB.employees.findIndex(x=>x.id===editingId);
         DB.employees[idx] = record;
       } else {
+        record.details.onboarding = newOnboardingChecklist();
         DB.employees.push(record);
         const d = new Date(doj+"T00:00:00");
         DB.salaryStructures.push({ id:newId("SS"), empId:id, effMonth:d.getMonth()+1, effYear:d.getFullYear(),
@@ -5080,6 +5261,77 @@ function attachHandlers(){
       toast(`Salary structure updated for ${emp?emp.name:salStructEmpId}, effective ${monthName(salStructEffMonth)} ${salStructEffYear}.`);
       resetSalStructDraft();
       renderAll();
+    };
+
+    const onboardEmpSelect = document.getElementById("onboardEmpSelect");
+    if(onboardEmpSelect) onboardEmpSelect.onchange = (e)=>{ onboardEmpId = e.target.value; newOnboardTaskDraft=""; renderAll(); };
+    document.querySelectorAll(".obTaskCheck").forEach(cb=>cb.onchange=async ()=>{
+      const emp = DB.employees.find(x=>x.id===onboardEmpId);
+      if(!emp) return;
+      const list = (emp.details && emp.details.onboarding) || [];
+      const t = list.find(x=>x.id===cb.dataset.id);
+      if(!t) return;
+      t.done = cb.checked;
+      t.date = cb.checked ? new Date().toISOString().slice(0,10) : null;
+      await save("employees");
+      renderAll();
+    });
+    document.querySelectorAll(".obTaskRemoveBtn").forEach(b=>b.onclick=async ()=>{
+      const emp = DB.employees.find(x=>x.id===onboardEmpId);
+      if(!emp || !emp.details) return;
+      emp.details.onboarding = (emp.details.onboarding||[]).filter(t=>t.id!==b.dataset.id);
+      await save("employees");
+      renderAll();
+    });
+    const newOnboardTaskInput = document.getElementById("newOnboardTaskInput");
+    if(newOnboardTaskInput) newOnboardTaskInput.oninput = ()=>{ newOnboardTaskDraft = newOnboardTaskInput.value; };
+    const addOnboardTaskBtn = document.getElementById("addOnboardTaskBtn");
+    if(addOnboardTaskBtn) addOnboardTaskBtn.onclick = async ()=>{
+      const task = newOnboardTaskDraft.trim();
+      if(!task){ toast("Enter a task name.", true); return; }
+      const emp = DB.employees.find(x=>x.id===onboardEmpId);
+      if(!emp) return;
+      if(!emp.details) emp.details = {};
+      if(!emp.details.onboarding) emp.details.onboarding = [];
+      emp.details.onboarding.push({id:newId("OB"), task, done:false, date:null});
+      await save("employees");
+      newOnboardTaskDraft = "";
+      toast("Task added.");
+      renderAll();
+    };
+
+    const letterEmpSelect = document.getElementById("letterEmpSelect");
+    if(letterEmpSelect) letterEmpSelect.onchange = (e)=>{ letterEmpId = e.target.value; renderAll(); };
+    const letterTypeSelect = document.getElementById("letterTypeSelect");
+    if(letterTypeSelect) letterTypeSelect.onchange = (e)=>{ letterType = e.target.value; renderAll(); };
+    const letterDesignationInput = document.getElementById("letterDesignationInput");
+    if(letterDesignationInput) letterDesignationInput.oninput = ()=>{ letterDesignation = letterDesignationInput.value; };
+    const letterManagerInput = document.getElementById("letterManagerInput");
+    if(letterManagerInput) letterManagerInput.oninput = ()=>{ letterReportingManager = letterManagerInput.value; };
+    const letterStartDateInput = document.getElementById("letterStartDateInput");
+    if(letterStartDateInput) letterStartDateInput.onchange = ()=>{ letterStartDate = letterStartDateInput.value; renderAll(); };
+    const generateLetterBtn = document.getElementById("generateLetterBtn");
+    if(generateLetterBtn) generateLetterBtn.onclick = async ()=>{
+      generateLetterBtn.disabled = true; generateLetterBtn.textContent = "Generating...";
+      try{
+        const emp = DB.employees.find(x=>x.id===letterEmpId);
+        const area = document.getElementById("letterPrintArea");
+        const canvas = await html2canvas(area, {scale:2, backgroundColor:"#ffffff"});
+        const imgData = canvas.toDataURL("image/png");
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({unit:"pt", format:"a4"});
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const imgWidth = pageWidth - 60;
+        const imgHeight = canvas.height * (imgWidth/canvas.width);
+        pdf.addImage(imgData, "PNG", 30, 30, imgWidth, imgHeight);
+        pdf.save(`${letterType}_Letter_${emp?emp.name:letterEmpId}.pdf`);
+        toast(`${letterType} Letter PDF downloaded.`);
+      }catch(err){
+        console.error(err);
+        toast("Could not generate PDF: " + err.message, true);
+      }finally{
+        generateLetterBtn.disabled = false; generateLetterBtn.textContent = "Generate PDF";
+      }
     };
   }
 
