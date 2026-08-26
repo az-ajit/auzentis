@@ -633,6 +633,39 @@ function renderUpcomingHolidaysCard(){
   </div>`;
 }
 
+// Days from `from` to the next occurrence of dob's month/day, ignoring
+// year (0 = today is the birthday, wraps to next year once it's passed).
+function daysToNextBirthday(dob, from){
+  if(!dob) return null;
+  const d = new Date(dob+"T00:00:00");
+  const f = new Date(from+"T00:00:00");
+  let next = new Date(f.getFullYear(), d.getMonth(), d.getDate());
+  if(next < f) next = new Date(f.getFullYear()+1, d.getMonth(), d.getDate());
+  return Math.round((next - f) / 86400000);
+}
+function isBirthdayToday(emp){
+  if(!emp || !emp.dob) return false;
+  return daysToNextBirthday(emp.dob, new Date().toISOString().slice(0,10)) === 0;
+}
+function renderUpcomingBirthdaysCard(){
+  const todayStr = new Date().toISOString().slice(0,10);
+  const upcoming = DB.employees.filter(e=>e.status==="Active" && e.dob)
+    .map(e=>({emp:e, days:daysToNextBirthday(e.dob, todayStr)}))
+    .filter(x=>x.days!==null && x.days<=30)
+    .sort((a,b)=>a.days-b.days);
+  return `
+  <div class="card">
+    <h2>Upcoming Birthdays</h2>
+    ${upcoming.length ? `
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Name</th><th>Date</th><th>When</th></tr></thead>
+        <tbody>${upcoming.map(x=>`<tr><td>${escapeHtml(x.emp.name)}</td><td>${x.emp.dob.slice(5)}</td><td>${x.days===0?'<b>Today 🎉</b>':x.days===1?'Tomorrow':`In ${x.days} days`}</td></tr>`).join("")}</tbody>
+      </table>
+    </div>` : `<div class="empty">No birthdays in the next 30 days (or DOB isn't on file for anyone yet).</div>`}
+  </div>`;
+}
+
 function todayAttendanceBreakdown(){
   const todayStr = new Date().toISOString().slice(0,10);
   const counts = {};
@@ -998,6 +1031,7 @@ function renderDashboard(){
       </div>
     </div>
     ${renderUpcomingHolidaysCard()}
+    ${renderUpcomingBirthdaysCard()}
     ${welcomeCard}`;
   }
 
@@ -1014,6 +1048,7 @@ function renderDashboard(){
       ${svgBarChart(attendanceChart)}
     </div>
     ${renderUpcomingHolidaysCard()}
+    ${renderUpcomingBirthdaysCard()}
     ${welcomeCard}`;
   }
 
@@ -1030,6 +1065,7 @@ function renderDashboard(){
       ${svgBarChart(payrollTrend)}
     </div>
     ${renderUpcomingHolidaysCard()}
+    ${renderUpcomingBirthdaysCard()}
     ${welcomeCard}`;
   }
 
@@ -1048,6 +1084,7 @@ function renderDashboard(){
       ${svgBarChart(pipelineChart)}
     </div>
     ${renderUpcomingHolidaysCard()}
+    ${renderUpcomingBirthdaysCard()}
     ${welcomeCard}`;
   }
 
@@ -1059,6 +1096,7 @@ function renderDashboard(){
     <div class="stat"><div class="lbl">${latest?"Employer Cost":"-"}</div><div class="val">₹${fmt0(costTotal)}</div></div>
   </div>
   ${renderUpcomingHolidaysCard()}
+  ${renderUpcomingBirthdaysCard()}
   ${welcomeCard}`;
 }
 
@@ -1073,6 +1111,11 @@ function renderMyDashboard(){
   const shortfall = currentEmpId ? computeMonthlyShortfall(currentEmpId, now.getMonth()+1, now.getFullYear()) : 0;
 
   return `
+  ${emp && isBirthdayToday(emp) ? `
+  <div class="card" style="background:var(--navy);color:#fff;text-align:center;">
+    <h2 style="color:#fff;">🎉 Happy Birthday, ${escapeHtml(emp.name)}! 🎉</h2>
+    <div class="sub" style="color:#fff;opacity:0.85;">Wishing you a great year ahead, from everyone at Auzentis.</div>
+  </div>` : ''}
   <div class="grid grid-2">
     <div class="stat"><div class="lbl">Today's Attendance</div><div class="val">${status}</div></div>
     <div class="stat"><div class="lbl">Welcome</div><div class="val">${emp ? emp.name : "-"}</div></div>
@@ -1085,6 +1128,7 @@ function renderMyDashboard(){
     </p>
   </div>` : ''}
   ${renderUpcomingHolidaysCard()}
+  ${renderUpcomingBirthdaysCard()}
   <div class="card">
     <h2>Welcome to Auzentis</h2>
     <div class="sub">Use the Attendance tab to punch in when you start work and punch out when you finish.</div>
@@ -3919,9 +3963,10 @@ function renderMyProfile(){
   return `
   <div class="card">
     <h2>My Profile</h2>
-    <div class="sub">Keep your own details up to date - HR uses this for payroll and records. Changes save straight to your employee record.</div>
+    <div class="sub">Keep your own details up to date - HR uses this for payroll and records. Changes save straight to your employee record. Set your Date of Birth so we can wish you on your birthday!</div>
     <div class="section-title">Personal Details</div>
     <div class="grid grid-4">
+      <div class="field"><label>Date of Birth</label><input type="date" id="mp_dob" value="${emp.dob||''}"></div>
       <div class="field"><label>PAN</label><input id="mp_pan" value="${escapeHtml(d.pan||'')}"></div>
       <div class="field"><label>Aadhar</label><input id="mp_aadhar" value="${escapeHtml(d.aadhar||'')}"></div>
       <div class="field" style="grid-column:span 2;"><label>Address</label><input id="mp_address" value="${escapeHtml(d.address||'')}"></div>
@@ -6238,17 +6283,18 @@ function attachHandlers(){
     if(saveMyProfileBtn) saveMyProfileBtn.onclick = async ()=>{
       saveMyProfileBtn.disabled = true; saveMyProfileBtn.textContent = "Saving...";
       try{
+        const dob = val("mp_dob");
         const patch = {
           pan: val("mp_pan").trim(), aadhar: val("mp_aadhar").trim(), address: val("mp_address").trim(),
           emergencyContactName: val("mp_emergencyName").trim(), emergencyContactPhone: val("mp_emergencyPhone").trim(),
           bankAccountName: val("mp_bankHolder").trim(), bankAccountNo: val("mp_bankAccNo").trim(),
           ifsc: val("mp_ifsc").trim(), bankName: val("mp_bankName").trim(),
         };
-        const { data, error } = await sb.functions.invoke("update-my-details", { body: patch });
+        const { data, error } = await sb.functions.invoke("update-my-details", { body: {...patch, dob} });
         if(error){ toast("Could not save: " + (await extractFnError(error)), true); return; }
         if(data && data.error){ toast(data.error, true); return; }
         const emp = DB.employees.find(e=>e.id===currentEmpId);
-        if(emp) emp.details = {...(emp.details||{}), ...patch};
+        if(emp){ emp.details = {...(emp.details||{}), ...patch}; if(dob) emp.dob = dob; }
         toast("Profile saved.");
       }catch(err){
         console.error(err);
