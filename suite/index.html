@@ -4565,7 +4565,7 @@ function dateInRange(dateStr, from, to){
 
 const REPORT_DEFS = {
   employees: {
-    label: "Employees", headers: ["Emp ID","Name","DOJ","DOB","Email","Resigned","Status","Basic","HRA","Other Allowance","Gross"],
+    label: "Employees", headers: ["Emp ID","Name","DOJ","DOB","Email","Resigned","Status","Basic","HRA","Other Allowance","Gross","PAN","Aadhar","Address","Emergency Contact Name","Emergency Contact Phone","Bank Account Name","Bank Account No","IFSC","Bank Name","Onboarding Progress"],
     dateNote: "Filtered by Date of Joining.",
     rows(from,to){
       return DB.employees.filter(e=>dateInRange(e.doj, from, to))
@@ -4573,7 +4573,11 @@ const REPORT_DEFS = {
           const s = currentStructureFor(e.id);
           const basic = s ? s.basic : (e.basic||0), hra = s ? s.hra : (e.hra||0);
           const other = s ? (s.components||[]).reduce((a,c)=>a+c.amount,0) : (e.other||0);
-          return [e.id,e.name,e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,basic,hra,other,basic+hra+other];
+          const d = e.details||{};
+          const ob = onboardingProgress(e);
+          return [e.id,e.name,e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,basic,hra,other,basic+hra+other,
+            d.pan||'',d.aadhar||'',d.address||'',d.emergencyContactName||'',d.emergencyContactPhone||'',
+            d.bankAccountName||'',d.bankAccountNo||'',d.ifsc||'',d.bankName||'',`${ob.done}/${ob.total}`];
         });
     }
   },
