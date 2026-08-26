@@ -1975,6 +1975,16 @@ function renderPayroll(){
     }
     return entry;
   });
+  // Live shortfall as of right now, for every employee - even one whose payroll row
+  // was already saved earlier in the month. Attendance recorded after that save (e.g.
+  // an absence today) never retroactively rewrites a saved lopHours value on its own -
+  // this surfaces the up-to-date suggestion next to the field so it's never silently
+  // missed, with a one-click way to pull it in before saving.
+  const liveSuggested = {};
+  activeEmployees.forEach(emp=>{
+    const shortfall = computeMonthlyShortfall(emp.id, payrollPeriod.month, payrollPeriod.year);
+    liveSuggested[emp.id] = shortfall >= ATTENDANCE_LOP_NOTIFY_THRESHOLD_HOURS ? Math.round(shortfall*100)/100 : 0;
+  });
   const results = entries.map(computePayroll).filter(Boolean);
   const totals = results.reduce((a,r)=>({gross:a.gross+r.gross,net:a.net+r.netPay,ded:a.ded+r.totalDed}),{gross:0,net:0,ded:0});
 
@@ -1988,7 +1998,10 @@ function renderPayroll(){
       <td class="num">${r.totalDays}</td>
       <td class="num">${r.avail}</td>
       <td class="num"><input type="number" min="0" class="badge-input leavesInput" value="${entry.leaves}" data-emp="${r.emp.id}"></td>
-      <td class="num"><input type="number" min="0" step="0.25" class="badge-input lopInput" value="${entry.lopHours||0}" data-emp="${r.emp.id}" title="Auto-suggested from attendance shortfall - editable"></td>
+      <td class="num">
+        <input type="number" min="0" step="0.25" class="badge-input lopInput" value="${entry.lopHours||0}" data-emp="${r.emp.id}" title="Auto-suggested from attendance shortfall - editable">
+        ${Math.abs((liveSuggested[r.emp.id]||0) - (entry.lopHours||0)) >= 0.25 ? `<div class="helptext" style="white-space:nowrap;">Current attendance suggests ${liveSuggested[r.emp.id]}h - <button type="button" class="btn ghost sm useLopBtn" data-emp="${r.emp.id}" data-hours="${liveSuggested[r.emp.id]}" style="padding:1px 8px;font-size:11px;">Use this</button></div>` : ''}
+      </td>
       <td class="num"><input type="number" min="0" max="100" step="0.1" class="badge-input qualityInput" value="${entry.quality==null?'':entry.quality}" data-emp="${r.emp.id}" placeholder="-" title="Quality % for this month, used by Quality bonus rules"></td>
       <td class="num"><input type="number" min="0" class="badge-input unitsInput" value="${entry.units==null?'':entry.units}" data-emp="${r.emp.id}" placeholder="-" title="Approved Units for this month, used by Production bonus rules"></td>
       <td class="num">${round2(r.payable)}</td>
@@ -4037,6 +4050,26 @@ function computeMonthlyShortfall(empId, month, year){
   return shortfall;
 }
 
+// Counts full calendar days this month (up to today) where the employee has
+// zero punch sessions and no approved leave/holiday/Sunday covers it - i.e.
+// a plain no-show. Distinct from computeMonthlyShortfall, which also counts
+// partial (Half Day) shortfalls in hours - this is whole days only, for a
+// simple headline number HR can't miss.
+function absentDaysThisMonth(empId, month, year){
+  const emp = DB.employees.find(e=>e.id===empId);
+  if(!emp || emp.status !== "Active") return 0;
+  const totalDays = daysInMonth(year, month);
+  const todayStr = new Date().toISOString().slice(0,10);
+  let count = 0;
+  for(let d=1; d<=totalDays; d++){
+    const dateStr = `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    if(dateStr > todayStr) break;
+    if(dateStr < emp.doj) continue;
+    if(statusForDay(empId, dateStr) === "Absent") count++;
+  }
+  return count;
+}
+
 function renderAttendance(){
   if(!attDate) attDate = new Date().toISOString().slice(0,10);
 
@@ -4044,6 +4077,7 @@ function renderAttendance(){
     return renderMyAttendance();
   }
 
+  const attMonth = Number(attDate.slice(5,7)), attYear = Number(attDate.slice(0,4));
   const rows = DB.employees.filter(e=>e.status==="Active").map(e=>{
     const sessions = sessionsForDay(e.id, attDate);
     const hrs = hoursForDay(e.id, attDate);
@@ -4051,6 +4085,7 @@ function renderAttendance(){
     const dropdownValue = (override && override.status) || "Present";
     const first = sessions[0];
     const last = sessions[sessions.length-1];
+    const absentDays = absentDaysThisMonth(e.id, attMonth, attYear);
     return `<tr data-emp="${e.id}" data-search="${escapeHtml((e.id+' '+e.name).toLowerCase())}">
       <td>${e.id}</td><td>${e.name}</td>
       <td>${first ? new Date(first.punchIn).toLocaleTimeString() : '<span class="helptext">-</span>'}</td>
@@ -4058,6 +4093,7 @@ function renderAttendance(){
       <td>${sessions.length}</td>
       <td>${sessions.length ? formatHours(hrs) : '<span class="helptext">-</span>'}</td>
       <td>${statusForDay(e.id, attDate)}</td>
+      <td class="num">${absentDays>0 ? `<span class="pill warn">${absentDays}</span>` : '0'}</td>
       <td>
         <select class="attStatus" data-emp="${e.id}">
           ${["Present","Absent","Half Day","On Leave"].map(s=>`<option ${s===dropdownValue?'selected':''}>${s}</option>`).join("")}
@@ -4074,7 +4110,7 @@ function renderAttendance(){
   return `
   <div class="card">
     <h2>Daily Attendance</h2>
-    <div class="sub">Status is auto-calculated from actual hours worked (≥${ATTENDANCE_TARGET_HOURS}h Present, ${ATTENDANCE_HALF_DAY_MIN_HOURS}–${ATTENDANCE_TARGET_HOURS}h Half Day, under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h Absent). Use the dropdown to override a specific day (e.g. On Leave) - it always wins over the auto-calculated status.</div>
+    <div class="sub">Status is auto-calculated from actual hours worked (≥${ATTENDANCE_TARGET_HOURS}h Present, ${ATTENDANCE_HALF_DAY_MIN_HOURS}–${ATTENDANCE_TARGET_HOURS}h Half Day, under ${ATTENDANCE_HALF_DAY_MIN_HOURS}h Absent). No punch at all on a working day auto-marks Absent - use the dropdown to override a specific day (e.g. On Leave) - it always wins over the auto-calculated status. "Absent Days" totals the selected date's month and directly drives the LOP Hours suggestion in Payroll.</div>
     <div class="row">
       <div class="field" style="max-width:160px;"><label>Date</label><input type="date" id="attDateInput" value="${attDate}"></div>
       <button class="btn ghost" id="loadAttBtn">Load</button>
@@ -4084,8 +4120,8 @@ function renderAttendance(){
     <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="attSearchInput" placeholder="Search by employee name or ID… (filters view only)"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th><th>Override</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="8" class="empty">No employees found.</td></tr>`}</tbody>
+        <thead><tr><th>ID</th><th>Name</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th><th>Absent Days (Month)</th><th>Override</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" class="empty">No employees found.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -5623,6 +5659,10 @@ function attachHandlers(){
   }
 
   if(activeTab==="Payroll"){
+    document.querySelectorAll(".useLopBtn").forEach(b=>b.onclick=()=>{
+      const input = document.querySelector(`.lopInput[data-emp="${b.dataset.emp}"]`);
+      if(input){ input.value = b.dataset.hours; b.closest(".helptext").remove(); }
+    });
     document.getElementById("loadPeriodBtn").onclick = async ()=>{
       const btn = document.getElementById("loadPeriodBtn");
       btn.disabled = true; btn.textContent = "Loading…";
