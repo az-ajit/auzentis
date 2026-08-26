@@ -2686,15 +2686,9 @@ function renderBooksGuide(){
 }
 
 function renderBooks(){
-  const navGroups = [
-    { label: null, views: [["vouchers","Vouchers"]] },
-    { label: "Masters", views: [["items","Stock Items"],["accounts","Chart of Accounts"],["parties","Party Ledgers"]] },
-    { label: "Reports", views: [["stock","Stock Summary"],["reconcile","Bank Reconciliation"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]] },
-  ];
-  const navBtn = ([k,l])=>`<button class="btn ${booksView===k?'gold':'ghost'} sm booksNavBtn" data-view="${k}">${l}</button>`;
-  const nav = `<div class="row" style="margin-bottom:14px;align-items:center;">${navGroups.map(g=>
-    (g.label?`<span class="helptext" style="margin:0 2px 0 6px;">${g.label}:</span>`:'') + g.views.map(navBtn).join("")
-  ).join("")}</div>`;
+  const views = [["vouchers","Vouchers"],["items","Stock Items"],["stock","Stock Summary"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["reconcile","Bank Reconciliation"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
+  const nav = `<div class="row" style="margin-bottom:14px;">${views.map(([k,l])=>
+    `<button class="btn ${booksView===k?'gold':'ghost'} sm booksNavBtn" data-view="${k}">${l}</button>`).join("")}</div>`;
 
   let body;
   if(booksView==="items") body = renderStockItems();
