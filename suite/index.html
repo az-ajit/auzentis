@@ -4093,7 +4093,7 @@ function renderAttendance(){
       <td>${sessions.length}</td>
       <td>${sessions.length ? formatHours(hrs) : '<span class="helptext">-</span>'}</td>
       <td>${statusForDay(e.id, attDate)}</td>
-      <td class="num">${absentDays>0 ? `<span class="pill warn">${absentDays}</span>` : '0'}</td>
+      <td style="text-align:center;">${absentDays>0 ? `<span class="pill warn">${absentDays}</span>` : '<span class="helptext">0</span>'}</td>
       <td>
         <select class="attStatus" data-emp="${e.id}">
           ${["Present","Absent","Half Day","On Leave"].map(s=>`<option ${s===dropdownValue?'selected':''}>${s}</option>`).join("")}
@@ -4120,7 +4120,7 @@ function renderAttendance(){
     <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="attSearchInput" placeholder="Search by employee name or ID… (filters view only)"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th><th>Absent Days (Month)</th><th>Override</th></tr></thead>
+        <thead><tr><th>ID</th><th>Name</th><th>First Punch</th><th>Last Punch</th><th>Sessions</th><th>Total Hours</th><th>Status</th><th style="text-align:center;white-space:nowrap;">Absent<br>(Month)</th><th>Override</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="9" class="empty">No employees found.</td></tr>`}</tbody>
       </table>
     </div>
@@ -4873,6 +4873,29 @@ const REPORT_DEFS = {
         });
       });
       return out;
+    }
+  },
+  absentSummary: {
+    label: "Attendance - Absent Days Summary", headers: ["Emp ID","Name","Days in Range","Present","Half Day","Absent","On Leave","Weekly Off","Holiday"],
+    dateNote: "One row per active employee, tallying their daily status across the whole date range - includes days with zero punches (marked Absent), not just days with a recorded session.",
+    rows(from,to){
+      const todayStr = new Date().toISOString().slice(0,10);
+      const rangeTo = to > todayStr ? todayStr : to;
+      return DB.employees.filter(e=>e.status==="Active").map(e=>{
+        const start = from < e.doj ? e.doj : from;
+        const counts = {Present:0,"Half Day":0,Absent:0,"On Leave":0,"Weekly Off":0,Holiday:0};
+        let d = new Date(start+"T00:00:00");
+        const end = new Date(rangeTo+"T00:00:00");
+        let total = 0;
+        while(d <= end){
+          const dateStr = d.toISOString().slice(0,10);
+          const s = statusForDay(e.id, dateStr);
+          if(counts[s]!==undefined) counts[s]++;
+          total++;
+          d.setDate(d.getDate()+1);
+        }
+        return [e.id, e.name, total, counts.Present, counts["Half Day"], counts.Absent, counts["On Leave"], counts["Weekly Off"], counts.Holiday];
+      });
     }
   },
   leaves: {
