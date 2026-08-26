@@ -270,7 +270,9 @@ let DB = {
   voucherLines: [],   // double-entry Dr/Cr lines per voucher
   salaryStructures: [], // {id,empId,effMonth,effYear,basic,hra,components:[{name,amount}],bonusPlanId} — full revision history, never overwritten
   bonusPlans: [], // {id,name,rules:[{id,name,type:"attendance"|"quality"|"production",amount,tiers,slabs}]} — named, assignable per employee via salaryStructures.bonusPlanId, so different employees/clients can run different plans at once
-  billAllocations: [] // {id,voucherId,billVoucherId,amount} — bill-wise settlement: which Payment/Receipt voucher paid how much of which Sales/Purchase bill, Tally-style
+  billAllocations: [], // {id,voucherId,billVoucherId,amount} — bill-wise settlement: which Payment/Receipt voucher paid how much of which Sales/Purchase bill, Tally-style
+  stockItems: [], // {id,name,hsnCode,unit,gstRate,defaultRate} — item master for item-wise Sales/Purchase invoicing (no stock-on-hand/valuation tracking — invoicing only)
+  voucherItems: [] // {id,voucherId,stockItemId,description,hsnCode,qty,rate,discountPct,amount,gstRate,gstAmount} — line items on an item-wise Sales/Purchase voucher; description/hsnCode/gstRate are denormalized at save time so a later item edit never rewrites a past invoice
 };
 
 const DEFAULT_SETTINGS = {
@@ -280,7 +282,8 @@ const DEFAULT_SETTINGS = {
   casualLeaveQuota:12, sickLeaveQuota:8, earnedLeaveQuota:15,
   officeLat: null, officeLng: null, officeRadiusM: 150,
   championAmounts: {first:5000, second:3000, third:2000, eom:0}, // default amounts for the fully-manual monthly Champion Bonus / Employee of the Month awards, editable per month in Payroll
-  showSignatureOnPayslip: true // company-wide default; individual employees can override via employees.signatureOverride
+  showSignatureOnPayslip: true, // company-wide default; individual employees can override via employees.signatureOverride
+  companyState: "Maharashtra" // Auzentis's own registered state — determines CGST+SGST (intra-state) vs IGST (inter-state) on item-wise Sales/Purchase vouchers, by comparing against the party's State
 };
 
 // Whether the signature/stamp block should appear on this employee's payslip:
@@ -365,7 +368,15 @@ const TABLE_CONFIG = {
     fromRow:r=>({id:r.id,name:r.name,rules:r.rules||[]}) },
   billAllocations: { table:"bill_allocations",
     toRow:a=>({id:a.id,voucher_id:a.voucherId,bill_voucher_id:a.billVoucherId,amount:a.amount}),
-    fromRow:r=>({id:r.id,voucherId:r.voucher_id,billVoucherId:r.bill_voucher_id,amount:Number(r.amount)}) }
+    fromRow:r=>({id:r.id,voucherId:r.voucher_id,billVoucherId:r.bill_voucher_id,amount:Number(r.amount)}) },
+  stockItems: { table:"stock_items",
+    toRow:i=>({id:i.id,name:i.name,hsn_code:i.hsnCode||null,unit:i.unit||null,gst_rate:i.gstRate||0,default_rate:i.defaultRate||0}),
+    fromRow:r=>({id:r.id,name:r.name,hsnCode:r.hsn_code||'',unit:r.unit||'',gstRate:Number(r.gst_rate||0),defaultRate:Number(r.default_rate||0)}) },
+  voucherItems: { table:"voucher_items",
+    toRow:i=>({id:i.id,voucher_id:i.voucherId,stock_item_id:i.stockItemId||null,description:i.description,hsn_code:i.hsnCode||null,
+      qty:i.qty,rate:i.rate,discount_pct:i.discountPct||0,amount:i.amount,gst_rate:i.gstRate||0,gst_amount:i.gstAmount||0}),
+    fromRow:r=>({id:r.id,voucherId:r.voucher_id,stockItemId:r.stock_item_id,description:r.description,hsnCode:r.hsn_code||'',
+      qty:Number(r.qty),rate:Number(r.rate),discountPct:Number(r.discount_pct||0),amount:Number(r.amount),gstRate:Number(r.gst_rate||0),gstAmount:Number(r.gst_amount||0)}) }
 };
 
 // ============================= AUTH =============================
@@ -1201,6 +1212,12 @@ function renderSettings(){
   const s = DB.settings;
   return `
   <div class="card">
+    <h2>Company GST Registration</h2>
+    <div class="sub">Your own registered state — compared against each customer/vendor's State (Chart of Accounts → Edit → Mailing Details) to decide CGST+SGST (same state) vs IGST (different state) on item-wise Sales/Purchase vouchers.</div>
+    <div class="field" style="max-width:280px;"><label>Company State</label><input id="companyState" value="${escapeHtml(s.companyState||'')}"></div>
+    <button class="btn gold" id="saveCompanyStateBtn">Save</button>
+  </div>
+  <div class="card">
     <h2>Statutory Settings</h2>
     <div class="sub">These rates apply to every payroll calculation across the app.</div>
     <div class="section-title">Provident Fund (PF)</div>
@@ -1740,7 +1757,9 @@ function renderPayments(){
 // ============================= ACCOUNTING ENGINE =============================
 const SYS_ACCOUNTS = {
   cash:"sys-cash", bank:"sys-bank", sales:"sys-sales", purchase:"sys-purchase",
-  gstPayable:"sys-gst-payable", gstInput:"sys-gst-input",
+  gstPayable:"sys-gst-payable", gstInput:"sys-gst-input", // legacy flat-GST vouchers only — kept so old data still reads correctly
+  cgstPayable:"sys-cgst-payable", sgstPayable:"sys-sgst-payable", igstPayable:"sys-igst-payable",
+  cgstInput:"sys-cgst-input", sgstInput:"sys-sgst-input", igstInput:"sys-igst-input",
   salaryExpense:"sys-salary-expense", pfErExpense:"sys-pf-er-expense", esiErExpense:"sys-esi-er-expense",
   pfPayable:"sys-pf-payable", esiPayable:"sys-esi-payable", ptPayable:"sys-pt-payable",
   tdsPayable:"sys-tds-payable", salaryPayable:"sys-salary-payable", capital:"sys-capital"
@@ -1752,6 +1771,12 @@ const SEED_CHART_OF_ACCOUNTS = [
   {id:SYS_ACCOUNTS.purchase, name:"Purchase Account", acc_group:"Purchase Accounts", nature:"Expense", is_system:true},
   {id:SYS_ACCOUNTS.gstPayable, name:"GST Payable (Output)", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
   {id:SYS_ACCOUNTS.gstInput, name:"GST Input Credit", acc_group:"Duties & Taxes", nature:"Asset", is_system:true},
+  {id:SYS_ACCOUNTS.cgstPayable, name:"CGST Payable (Output)", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.sgstPayable, name:"SGST Payable (Output)", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.igstPayable, name:"IGST Payable (Output)", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
+  {id:SYS_ACCOUNTS.cgstInput, name:"CGST Input Credit", acc_group:"Duties & Taxes", nature:"Asset", is_system:true},
+  {id:SYS_ACCOUNTS.sgstInput, name:"SGST Input Credit", acc_group:"Duties & Taxes", nature:"Asset", is_system:true},
+  {id:SYS_ACCOUNTS.igstInput, name:"IGST Input Credit", acc_group:"Duties & Taxes", nature:"Asset", is_system:true},
   {id:SYS_ACCOUNTS.salaryExpense, name:"Salary Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
   {id:SYS_ACCOUNTS.pfErExpense, name:"PF Employer Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
   {id:SYS_ACCOUNTS.esiErExpense, name:"ESI Employer Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
@@ -1875,6 +1900,17 @@ async function loadAccountingData(){
       if(!error) DB.ledgerAccounts = SEED_CHART_OF_ACCOUNTS.map(a=>({id:a.id,name:a.name,accGroup:a.acc_group,nature:a.nature,
         isParty:false,partyType:null,openingBalance:0,openingBalanceType:"Dr",isSystem:a.is_system||false}));
       else toast("Could not seed Chart of Accounts: " + error.message, true);
+    } else {
+      // Backfill any system accounts added in a later version (e.g. the
+      // CGST/SGST/IGST split) that predate this install's Chart of Accounts.
+      const missing = SEED_CHART_OF_ACCOUNTS.filter(a=>a.is_system && !DB.ledgerAccounts.some(x=>x.id===a.id));
+      if(missing.length){
+        const rows = missing.map(a=>({id:a.id,name:a.name,acc_group:a.acc_group,nature:a.nature,
+          is_party:false,opening_balance:0,opening_balance_type:"Dr",is_system:true}));
+        const { error } = await sb.from("ledger_accounts").insert(rows);
+        if(!error) DB.ledgerAccounts.push(...missing.map(a=>({id:a.id,name:a.name,accGroup:a.acc_group,nature:a.nature,
+          isParty:false,partyType:null,openingBalance:0,openingBalanceType:"Dr",isSystem:true,details:{}})));
+      }
     }
 
     const { data: vouchers, error: vErr } = await sb.from("vouchers").select("*");
@@ -1962,6 +1998,8 @@ async function deleteVoucher(voucherId){
     // point at a deleted voucher.
     await sb.from("bill_allocations").delete().or(`voucher_id.eq.${voucherId},bill_voucher_id.eq.${voucherId}`);
     DB.billAllocations = DB.billAllocations.filter(a=>a.voucherId!==voucherId && a.billVoucherId!==voucherId);
+    await sb.from("voucher_items").delete().eq("voucher_id", voucherId);
+    DB.voucherItems = DB.voucherItems.filter(i=>i.voucherId!==voucherId);
     DB.voucherLines = DB.voucherLines.filter(l=>l.voucherId!==voucherId);
     DB.vouchers = DB.vouchers.filter(v=>v.id!==voucherId);
     toast("Voucher deleted.");
@@ -2062,19 +2100,60 @@ function incomeExpenseAccounts(nature){
 }
 
 function renderBooks(){
-  const views = [["vouchers","Vouchers"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
+  const views = [["vouchers","Vouchers"],["items","Stock Items"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
   const nav = `<div class="row" style="margin-bottom:14px;">${views.map(([k,l])=>
     `<button class="btn ${booksView===k?'gold':'ghost'} sm booksNavBtn" data-view="${k}">${l}</button>`).join("")}</div>`;
 
   let body;
-  if(booksView==="accounts") body = renderChartOfAccounts();
+  if(booksView==="items") body = renderStockItems();
+  else if(booksView==="accounts") body = renderChartOfAccounts();
   else if(booksView==="parties") body = renderPartyLedgers();
+  else if(booksView==="gst") body = renderGstSummary();
   else if(booksView==="trial") body = renderTrialBalance();
   else if(booksView==="pnl") body = renderBooksPnl();
   else if(booksView==="balance") body = renderBalanceSheet();
   else body = renderVouchersView();
 
   return nav + body;
+}
+
+// ---- Stock Items (item master for item-wise invoicing — no stock-on-hand/valuation tracking) ----
+let itemEditingId = null;
+function renderStockItems(){
+  const rows = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`
+    <tr data-id="${i.id}">
+      <td>${escapeHtml(i.name)}</td><td>${escapeHtml(i.hsnCode||'—')}</td><td>${escapeHtml(i.unit||'—')}</td>
+      <td class="num">${i.gstRate}%</td><td class="num">${fmt(i.defaultRate)}</td>
+      <td class="actions">
+        <button class="btn ghost sm editItemBtn">Edit</button>
+        <button class="btn danger sm delItemBtn">Delete</button>
+      </td>
+    </tr>`).join("");
+  const editing = itemEditingId ? DB.stockItems.find(i=>i.id===itemEditingId) : null;
+  return `
+  <div class="card">
+    <h2>Stock Items</h2>
+    <div class="sub">Items/services you invoice against — used for item-wise Sales/Purchase vouchers (qty, rate, HSN, GST % per line). This is an item master for invoicing only; it doesn't track stock-on-hand or valuation.</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Name</th><th>HSN/SAC Code</th><th>Unit</th><th>GST %</th><th>Default Rate (₹)</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No items yet.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="section-title">${editing ? `Edit Item — ${escapeHtml(editing.name)}` : 'Add Item'}</div>
+    <input type="hidden" id="itemEditingId" value="${itemEditingId||''}">
+    <div class="grid grid-4">
+      <div class="field"><label>Name</label><input id="item_name" placeholder="e.g. Vextron SS10X" value="${editing?escapeHtml(editing.name):''}"></div>
+      <div class="field"><label>HSN/SAC Code</label><input id="item_hsn" value="${editing?escapeHtml(editing.hsnCode||''):''}"></div>
+      <div class="field"><label>Unit</label><input id="item_unit" placeholder="e.g. Pcs, Kg, Nos" value="${editing?escapeHtml(editing.unit||''):''}"></div>
+      <div class="field"><label>GST %</label><input type="number" id="item_gst" value="${editing?editing.gstRate:18}"></div>
+      <div class="field"><label>Default Rate (₹)</label><input type="number" id="item_rate" value="${editing?editing.defaultRate:0}"></div>
+    </div>
+    <div class="row">
+      <button class="btn gold" id="saveItemBtn">${editing ? 'Save Changes' : 'Add Item'}</button>
+      ${editing ? `<button class="btn ghost" id="cancelItemEditBtn">Cancel Edit</button>` : ''}
+    </div>
+  </div>`;
 }
 
 // ---- Chart of Accounts ----
@@ -2175,9 +2254,12 @@ function renderVouchersView(){
     .sort((a,b)=>b.date.localeCompare(a.date)).map(v=>{
       const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
       const total = lines.reduce((a,l)=>a+(l.debit||0),0);
+      const items = DB.voucherItems.filter(i=>i.voucherId===v.id);
+      const itemsTitle = items.length ? items.map(i=>`${i.description} — ${i.qty} x ₹${fmt0(i.rate)} (${i.gstRate}% GST) = ₹${fmt0(i.amount+i.gstAmount)}`).join("\n") : "";
       return `<tr data-id="${v.id}">
         <td>${v.date}</td><td>${v.voucherNo}</td><td>${v.voucherType}</td>
-        <td>${v.partyId?accName(v.partyId):''}</td><td>${v.narration||''}</td>
+        <td>${v.partyId?accName(v.partyId):''}</td>
+        <td${itemsTitle?` title="${escapeHtml(itemsTitle)}"`:''}>${v.narration||''}${items.length?` <span class="helptext">(${items.length} item${items.length>1?'s':''} — hover for details)</span>`:''}</td>
         <td class="num">${fmt(total)}</td>
         <td><button class="btn danger sm delVoucherBtn">Delete</button></td>
       </tr>`;
@@ -2255,23 +2337,81 @@ async function importVouchersCsv(text){
   renderAll();
 }
 
+// Item-wise Sales/Purchase entry: a line per Stock Item (qty/rate/discount),
+// with CGST+SGST (same state as the company) or IGST (different state)
+// computed from each item's own GST % and the party's State on file.
+// voucherSalesPartyId/voucherItemRows persist across re-renders the same
+// way voucherPayRecTarget does; row inputs update voucherItemRows directly
+// via oninput/onchange (no re-render on every keystroke — same pattern as
+// the Journal voucher's rows), and Save reads straight from that array.
+let voucherSalesPartyId = null;
+let voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
+
+function voucherItemRowAmount(r){ return round2((r.qty||0) * (r.rate||0) * (1 - (r.discountPct||0)/100)); }
+
 function voucherFormSalesPurchase(type){
   const isSales = type==="Sales";
   const partyList = parties(isSales?"Debtor":"Creditor");
   const acctList = isSales ? incomeExpenseAccounts("Income") : incomeExpenseAccounts("Expense");
   const defaultAcc = isSales ? SYS_ACCOUNTS.sales : SYS_ACCOUNTS.purchase;
+  if(voucherSalesPartyId===null) voucherSalesPartyId = partyList.length ? partyList[0].id : "";
+
+  const party = DB.ledgerAccounts.find(a=>a.id===voucherSalesPartyId);
+  const partyState = (party && party.details && party.details.state) ? party.details.state.trim() : "";
+  const companyState = (DB.settings.companyState||"").trim();
+  const isInterState = !!(partyState && companyState && partyState.toLowerCase() !== companyState.toLowerCase());
+
+  const taxableValue = round2(voucherItemRows.reduce((s,r)=>s+voucherItemRowAmount(r),0));
+  const gstTotal = round2(voucherItemRows.reduce((s,r)=>{
+    const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+    return s + voucherItemRowAmount(r) * (item ? item.gstRate : 0)/100;
+  },0));
+  const cgst = isInterState ? 0 : round2(gstTotal/2);
+  const sgst = isInterState ? 0 : round2(gstTotal/2);
+  const igst = isInterState ? gstTotal : 0;
+  const grandTotal = round2(taxableValue + gstTotal);
+
+  const itemRowsHtml = voucherItemRows.map((r,i)=>{
+    const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+    return `<tr>
+      <td><select class="viItem" data-i="${i}">${DB.stockItems.length ? `<option value="">— select item —</option>` + DB.stockItems.map(x=>`<option value="${x.id}" ${x.id===r.stockItemId?'selected':''}>${escapeHtml(x.name)}</option>`).join("") : `<option value="">— add one in Books → Stock Items first —</option>`}</select></td>
+      <td>${item ? escapeHtml(item.hsnCode||'—') : '—'}</td>
+      <td><input type="number" class="viQty" data-i="${i}" value="${r.qty}" min="0" style="width:80px;"></td>
+      <td><input type="number" class="viRate" data-i="${i}" value="${r.rate}" min="0" style="width:100px;"></td>
+      <td><input type="number" class="viDisc" data-i="${i}" value="${r.discountPct||0}" min="0" max="100" style="width:70px;"></td>
+      <td class="num">${fmt(voucherItemRowAmount(r))}</td>
+      <td>${item ? item.gstRate+'%' : '—'}</td>
+      <td><button type="button" class="btn danger sm viRemoveBtn" data-i="${i}">Remove</button></td>
+    </tr>`;
+  }).join("");
+
   return `
     <div class="grid grid-4">
       <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
       <div class="field"><label>${isSales?"Customer":"Vendor"}</label>
-        <select id="v_party">${partyList.map(p=>`<option value="${p.id}">${p.name}</option>`).join("") || `<option value="">— add one in Chart of Accounts first —</option>`}</select>
+        <select id="v_party">${partyList.map(p=>`<option value="${p.id}" ${p.id===voucherSalesPartyId?'selected':''}>${p.name}</option>`).join("") || `<option value="">— add one in Chart of Accounts first —</option>`}</select>
+        ${partyState ? `<p class="helptext">State: ${escapeHtml(partyState)} — ${isInterState?'Inter-state (IGST applies)':'Same state (CGST+SGST applies)'}</p>`
+          : `<p class="helptext">No State on file for this party (Chart of Accounts → Edit → Mailing Details) — defaulting to same-state (CGST+SGST).</p>`}
       </div>
-      <div class="field"><label>${isSales?"Sales":"Expense/Purchase"} Account</label>
+      <div class="field"><label>${isSales?"Sales":"Purchase"} Ledger</label>
         <select id="v_account">${acctList.map(a=>`<option value="${a.id}" ${a.id===defaultAcc?'selected':''}>${a.name}</option>`).join("")}</select>
       </div>
-      <div class="field"><label>Amount (₹, excl. GST)</label><input type="number" id="v_amount" value="0"></div>
-      <div class="field"><label>GST %</label><input type="number" id="v_gst" value="18"></div>
       <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
+    </div>
+    <div class="section-title">Items</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Item</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc %</th><th>Amount</th><th>GST %</th><th></th></tr></thead>
+        <tbody>${itemRowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="row"><button type="button" class="btn ghost sm" id="viAddRowBtn">+ Add Item</button></div>
+    <div class="grid grid-4" style="margin-top:12px;">
+      <div class="field"><label>Taxable Value</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
+      ${isInterState
+        ? `<div class="field"><label>IGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(igst)}</div></div>`
+        : `<div class="field"><label>CGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(cgst)}</div></div><div class="field"><label>SGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(sgst)}</div></div>`}
+      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(grandTotal)}</div></div>
     </div>
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
 }
@@ -2432,6 +2572,67 @@ function renderPartyLedgers(){
     <div class="row"><select id="partySelect" style="max-width:280px;"><option value="">Select a party…</option>${partyOptions}</select></div>
   </div>
   ${detail}`;
+}
+
+// ---- GST Summary (HSN-wise, working-paper level — not a filed-return export) ----
+// Which tax accounts a voucher actually posted to tells us whether it was
+// intra-state (CGST+SGST) or inter-state (IGST); applied to every item line
+// on that voucher so the HSN-wise breakdown gets the same split.
+function voucherTaxSplitType(voucherId){
+  const lines = DB.voucherLines.filter(l=>l.voucherId===voucherId);
+  if(lines.some(l=>l.accountId===SYS_ACCOUNTS.igstPayable || l.accountId===SYS_ACCOUNTS.igstInput)) return "inter";
+  if(lines.some(l=>l.accountId===SYS_ACCOUNTS.cgstPayable || l.accountId===SYS_ACCOUNTS.cgstInput)) return "intra";
+  return "legacy"; // pre-item-wise vouchers with a single flat GST% — no CGST/SGST/IGST split on file
+}
+
+let booksGstRange = null;
+function renderGstSummary(){
+  if(!booksGstRange){ const r = quickRange("month"); booksGstRange = {from:r.from, to:r.to}; }
+
+  const summarize = (voucherType)=>{
+    const rowsByKey = {};
+    DB.voucherItems.forEach(it=>{
+      const v = DB.vouchers.find(x=>x.id===it.voucherId);
+      if(!v || v.voucherType!==voucherType || !dateInRange(v.date, booksGstRange.from, booksGstRange.to)) return;
+      const split = voucherTaxSplitType(v.id);
+      const key = (it.hsnCode||'—') + "|" + it.gstRate;
+      if(!rowsByKey[key]) rowsByKey[key] = {hsnCode:it.hsnCode||'—', gstRate:it.gstRate, qty:0, taxable:0, cgst:0, sgst:0, igst:0};
+      const r = rowsByKey[key];
+      r.qty += it.qty||0;
+      r.taxable += it.amount||0;
+      if(split==="inter") r.igst += it.gstAmount||0;
+      else if(split==="intra"){ r.cgst += (it.gstAmount||0)/2; r.sgst += (it.gstAmount||0)/2; }
+      // "legacy" vouchers contribute taxable value but no CGST/SGST/IGST split (none was recorded)
+    });
+    return Object.values(rowsByKey).sort((a,b)=>a.hsnCode.localeCompare(b.hsnCode));
+  };
+
+  const outward = summarize("Sales"), inward = summarize("Purchase");
+  const totalRow = rows => rows.reduce((a,r)=>({taxable:a.taxable+r.taxable,cgst:a.cgst+r.cgst,sgst:a.sgst+r.sgst,igst:a.igst+r.igst}), {taxable:0,cgst:0,sgst:0,igst:0});
+  const table = (title, rows) => {
+    const t = totalRow(rows);
+    return `<div class="card"><h2>${title}</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>HSN/SAC</th><th>GST %</th><th>Qty</th><th>Taxable Value</th><th>CGST</th><th>SGST</th><th>IGST</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr><td>${escapeHtml(r.hsnCode)}</td><td class="num">${r.gstRate}%</td><td class="num">${r.qty}</td>
+          <td class="num">${fmt(r.taxable)}</td><td class="num">${fmt(r.cgst)}</td><td class="num">${fmt(r.sgst)}</td><td class="num">${fmt(r.igst)}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">No item-wise vouchers in this range.</td></tr>`}</tbody>
+        <tfoot><tr><td colspan="3"><b>Total</b></td><td class="num"><b>${fmt(t.taxable)}</b></td><td class="num"><b>${fmt(t.cgst)}</b></td><td class="num"><b>${fmt(t.sgst)}</b></td><td class="num"><b>${fmt(t.igst)}</b></td></tr></tfoot>
+      </table></div>
+    </div>`;
+  };
+
+  return `
+  <div class="card">
+    <h2>GST Summary</h2>
+    <div class="sub">HSN-wise outward (Sales) and inward (Purchase) tax summary from item-wise vouchers — a working paper for your GST filing, not a filed-return export. Vouchers saved before item-wise invoicing was added won't appear here (no HSN/tax-split data was recorded for them).</div>
+    <div class="row">
+      <div class="field" style="max-width:180px;"><label>From</label><input type="date" id="gst_from" value="${booksGstRange.from}"></div>
+      <div class="field" style="max-width:180px;"><label>To</label><input type="date" id="gst_to" value="${booksGstRange.to}"></div>
+      <button class="btn ghost" id="loadGstBtn">Apply</button>
+    </div>
+  </div>
+  ${table("Outward Supplies (Sales)", outward)}
+  ${table("Inward Supplies (Purchase)", inward)}`;
 }
 
 // ---- Trial Balance ----
@@ -3845,6 +4046,14 @@ function attachHandlers(){
       toast("Settings saved.");
     };
 
+    const saveCompanyStateBtn = document.getElementById("saveCompanyStateBtn");
+    if(saveCompanyStateBtn) saveCompanyStateBtn.onclick = async ()=>{
+      DB.settings = { ...DB.settings, companyState: val("companyState").trim() };
+      await save("settings");
+      await logAudit("update", "settings", null, {companyState: DB.settings.companyState});
+      toast("Company GST registration saved.");
+    };
+
     const saveSignatureSettingBtn = document.getElementById("saveSignatureSettingBtn");
     if(saveSignatureSettingBtn) saveSignatureSettingBtn.onclick = async ()=>{
       DB.settings = { ...DB.settings, showSignatureOnPayslip: document.getElementById("showSignatureOnPayslip").checked };
@@ -4459,6 +4668,54 @@ function attachHandlers(){
   if(activeTab==="Books"){
     document.querySelectorAll(".booksNavBtn").forEach(b=>b.onclick=()=>{ booksView = b.dataset.view; renderAll(); });
 
+    if(booksView==="items"){
+      document.getElementById("saveItemBtn").onclick = async ()=>{
+        const editingId = val("itemEditingId");
+        const name = val("item_name").trim();
+        if(!name){ toast("Enter an item name.", true); return; }
+        const gstRate = parseFloat(val("item_gst"))||0;
+        const defaultRate = parseFloat(val("item_rate"))||0;
+        if(gstRate<0 || defaultRate<0){ toast("GST % and Default Rate cannot be negative.", true); return; }
+        const values = { name, hsnCode: val("item_hsn").trim(), unit: val("item_unit").trim(), gstRate, defaultRate };
+        if(editingId){
+          const row = { name: values.name, hsn_code: values.hsnCode||null, unit: values.unit||null, gst_rate: values.gstRate, default_rate: values.defaultRate };
+          const { error } = await sb.from("stock_items").update(row).eq("id", editingId);
+          if(error){ toast("Could not update item: " + error.message, true); return; }
+          const idx = DB.stockItems.findIndex(i=>i.id===editingId);
+          if(idx>-1) DB.stockItems[idx] = {...DB.stockItems[idx], ...values};
+          toast("Item updated.");
+          itemEditingId = null;
+        } else {
+          const id = newId("ITM");
+          const row = { id, name: values.name, hsn_code: values.hsnCode||null, unit: values.unit||null, gst_rate: values.gstRate, default_rate: values.defaultRate };
+          const { error } = await sb.from("stock_items").insert(row);
+          if(error){ toast("Could not add item: " + error.message, true); return; }
+          DB.stockItems.push({id, ...values});
+          toast("Item added.");
+        }
+        renderAll();
+      };
+      document.querySelectorAll(".editItemBtn").forEach(b=>b.onclick=(e)=>{
+        itemEditingId = e.target.closest("tr").dataset.id;
+        renderAll();
+        const el = document.getElementById("item_name");
+        if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+      });
+      const cancelItemEditBtn = document.getElementById("cancelItemEditBtn");
+      if(cancelItemEditBtn) cancelItemEditBtn.onclick = ()=>{ itemEditingId = null; renderAll(); };
+      document.querySelectorAll(".delItemBtn").forEach(b=>b.onclick=async (e)=>{
+        const id = e.target.closest("tr").dataset.id;
+        if(DB.voucherItems.some(vi=>vi.stockItemId===id)){ toast("Can't delete — this item has been used on an invoice. Vouchers keep their own copy of the item details, so this is just to avoid confusion going forward.", true); return; }
+        if(!confirm("Delete this item?")) return;
+        const { error } = await sb.from("stock_items").delete().eq("id", id);
+        if(error){ toast("Could not delete: " + error.message, true); return; }
+        DB.stockItems = DB.stockItems.filter(i=>i.id!==id);
+        if(itemEditingId===id) itemEditingId = null;
+        toast("Item deleted.");
+        renderAll();
+      });
+    }
+
     if(booksView==="accounts"){
       document.getElementById("addAccBtn").onclick = async ()=>{
         const editingId = val("accEditingId");
@@ -4527,6 +4784,7 @@ function attachHandlers(){
       document.querySelectorAll(".voucherTypeBtn").forEach(b=>b.onclick=()=>{
         voucherType = b.dataset.type;
         voucherPayRecTarget = null; paymentBillAllocDraft = {};
+        voucherSalesPartyId = null; voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
         renderAll();
       });
       document.getElementById("loadDayBookBtn").onclick = ()=>{
@@ -4590,6 +4848,30 @@ function attachHandlers(){
         if(clearAllocBtn) clearAllocBtn.onclick = ()=>{ paymentBillAllocDraft = {}; renderAll(); };
       }
 
+      if(voucherType==="Sales" || voucherType==="Purchase"){
+        const partySel = document.getElementById("v_party");
+        if(partySel) partySel.onchange = (e)=>{ voucherSalesPartyId = e.target.value; renderAll(); };
+        document.getElementById("viAddRowBtn").onclick = ()=>{
+          voucherItemRows.push({stockItemId:"", qty:1, rate:0, discountPct:0});
+          renderAll();
+        };
+        document.querySelectorAll(".viRemoveBtn").forEach(b=>b.onclick=()=>{
+          voucherItemRows.splice(parseInt(b.dataset.i), 1);
+          if(!voucherItemRows.length) voucherItemRows.push({stockItemId:"", qty:1, rate:0, discountPct:0});
+          renderAll();
+        });
+        document.querySelectorAll(".viItem").forEach(sel=>sel.onchange=()=>{
+          const i = parseInt(sel.dataset.i);
+          voucherItemRows[i].stockItemId = sel.value;
+          const item = DB.stockItems.find(x=>x.id===sel.value);
+          if(item && !voucherItemRows[i].rate) voucherItemRows[i].rate = item.defaultRate||0;
+          renderAll();
+        });
+        document.querySelectorAll(".viQty").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].qty = parseFloat(inp.value)||0; });
+        document.querySelectorAll(".viRate").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].rate = parseFloat(inp.value)||0; });
+        document.querySelectorAll(".viDisc").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].discountPct = parseFloat(inp.value)||0; });
+      }
+
       if(voucherType==="Journal"){
         document.getElementById("jrAddRowBtn").onclick = ()=>{ journalRows.push({account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0}); renderAll(); };
         document.querySelectorAll(".jrRemoveBtn").forEach(b=>b.onclick=()=>{
@@ -4612,24 +4894,47 @@ function attachHandlers(){
         if(kind==="Sales" || kind==="Purchase"){
           const partyId = val("v_party");
           const acctId = val("v_account");
-          const amount = parseFloat(val("v_amount"))||0;
-          const gstPct = parseFloat(val("v_gst"))||0;
-          if(!partyId || amount<=0){ toast("Choose a party and enter a positive amount.", true); return; }
-          const gstAmt = amount * gstPct/100;
+          if(!partyId){ toast("Choose a party.", true); return; }
+          const validRows = voucherItemRows.filter(r=>r.stockItemId && voucherItemRowAmount(r)>0);
+          if(!validRows.length){ toast("Add at least one item with a stock item, quantity, and rate.", true); return; }
+
+          const party = DB.ledgerAccounts.find(a=>a.id===partyId);
+          const partyState = (party && party.details && party.details.state) ? party.details.state.trim() : "";
+          const companyState = (DB.settings.companyState||"").trim();
+          const isInterState = !!(partyState && companyState && partyState.toLowerCase() !== companyState.toLowerCase());
+
+          const taxableValue = round2(validRows.reduce((s,r)=>s+voucherItemRowAmount(r),0));
+          const gstTotal = round2(validRows.reduce((s,r)=>{
+            const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+            return s + voucherItemRowAmount(r) * (item?item.gstRate:0)/100;
+          },0));
+          const cgst = isInterState ? 0 : round2(gstTotal/2);
+          const sgst = isInterState ? 0 : round2(gstTotal/2);
+          const igst = isInterState ? gstTotal : 0;
+
           voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date, partyId, narration};
           if(kind==="Sales"){
             lines = [
-              {accountId:partyId, debit:amount+gstAmt, credit:0},
-              {accountId:acctId, debit:0, credit:amount},
+              {accountId:partyId, debit:taxableValue+gstTotal, credit:0},
+              {accountId:acctId, debit:0, credit:taxableValue},
             ];
-            if(gstAmt>0) lines.push({accountId:SYS_ACCOUNTS.gstPayable, debit:0, credit:gstAmt});
+            if(isInterState){ if(igst>0) lines.push({accountId:SYS_ACCOUNTS.igstPayable, debit:0, credit:igst}); }
+            else { if(cgst>0) lines.push({accountId:SYS_ACCOUNTS.cgstPayable, debit:0, credit:cgst}); if(sgst>0) lines.push({accountId:SYS_ACCOUNTS.sgstPayable, debit:0, credit:sgst}); }
           } else {
             lines = [
-              {accountId:acctId, debit:amount, credit:0},
-              {accountId:partyId, debit:0, credit:amount+gstAmt},
+              {accountId:acctId, debit:taxableValue, credit:0},
+              {accountId:partyId, debit:0, credit:taxableValue+gstTotal},
             ];
-            if(gstAmt>0) lines.push({accountId:SYS_ACCOUNTS.gstInput, debit:gstAmt, credit:0});
+            if(isInterState){ if(igst>0) lines.push({accountId:SYS_ACCOUNTS.igstInput, debit:igst, credit:0}); }
+            else { if(cgst>0) lines.push({accountId:SYS_ACCOUNTS.cgstInput, debit:cgst, credit:0}); if(sgst>0) lines.push({accountId:SYS_ACCOUNTS.sgstInput, debit:sgst, credit:0}); }
           }
+          voucher._items = validRows.map(r=>{
+            const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+            const amount = voucherItemRowAmount(r);
+            return { stockItemId:r.stockItemId, description:item?item.name:"", hsnCode:item?item.hsnCode:"",
+              qty:r.qty, rate:r.rate, discountPct:r.discountPct||0, amount,
+              gstRate:item?item.gstRate:0, gstAmount:round2(amount*(item?item.gstRate:0)/100) };
+          });
         } else if(kind==="Payment" || kind==="Receipt"){
           const cashBankId = val("v_cashbank");
           const target = val("v_target");
@@ -4677,15 +4982,21 @@ function attachHandlers(){
         }
 
         const billAllocs = voucher._billAllocs; delete voucher._billAllocs;
+        const items = voucher._items; delete voucher._items;
         const ok = await saveVoucher(voucher, lines);
         if(ok){
           if(billAllocs && billAllocs.length){
             billAllocs.forEach(a=> DB.billAllocations.push({id:newId("BA"), voucherId:voucher.id, billVoucherId:a.billVoucherId, amount:a.amount}));
             await save("billAllocations");
           }
+          if(items && items.length){
+            items.forEach(it=> DB.voucherItems.push({id:newId("VI"), voucherId:voucher.id, ...it}));
+            await save("voucherItems");
+          }
           toast(kind + " voucher saved.");
           if(kind==="Journal") journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
           voucherPayRecTarget = null; paymentBillAllocDraft = {};
+          voucherSalesPartyId = null; voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
           renderAll();
         }
       };
@@ -4703,6 +5014,9 @@ function attachHandlers(){
     if(booksView==="parties"){
       const sel = document.getElementById("partySelect");
       if(sel) sel.onchange = ()=>{ booksPartyId = sel.value || null; renderAll(); };
+    }
+    if(booksView==="gst"){
+      document.getElementById("loadGstBtn").onclick = ()=>{ booksGstRange = {from:val("gst_from"), to:val("gst_to")}; renderAll(); };
     }
   }
 
