@@ -1862,7 +1862,7 @@ async function loadAccountingData(){
     if(aErr){ toast("Could not load Chart of Accounts: " + aErr.message, true); DB.ledgerAccounts = []; }
     else DB.ledgerAccounts = (accs||[]).map(r=>({id:r.id,name:r.name,accGroup:r.acc_group,nature:r.nature,isParty:r.is_party,
       partyType:r.party_type,openingBalance:Number(r.opening_balance),openingBalanceType:r.opening_balance_type,
-      isSystem:r.is_system,gstin:r.gstin,contact:r.contact}));
+      isSystem:r.is_system,details:r.details||{}}));
 
     if(DB.ledgerAccounts.length===0){
       const rows = SEED_CHART_OF_ACCOUNTS.map(a=>({id:a.id,name:a.name,acc_group:a.acc_group,nature:a.nature,
@@ -2033,14 +2033,21 @@ function renderBooks(){
 }
 
 // ---- Chart of Accounts ----
+let accEditingId = null;
 function renderChartOfAccounts(){
   const rows = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name)).map(a=>`
     <tr data-id="${a.id}">
       <td>${a.name}</td><td>${a.accGroup}</td><td>${a.nature}</td>
       <td>${a.isParty ? (a.partyType||'Party') : ''}</td>
       <td class="num">${fmt(accountBalance(a.id))} ${a.nature==="Asset"||a.nature==="Expense"?'Dr':'Cr'}</td>
-      <td>${a.isSystem ? '<span class="helptext">system</span>' : `<button class="btn danger sm delAccBtn">Delete</button>`}</td>
+      <td class="actions">
+        <button class="btn ghost sm editAccBtn">Edit</button>
+        ${a.isSystem ? '<span class="helptext">system</span>' : `<button class="btn danger sm delAccBtn">Delete</button>`}
+      </td>
     </tr>`).join("");
+
+  const editing = accEditingId ? DB.ledgerAccounts.find(a=>a.id===accEditingId) : null;
+  const d = (editing && editing.details) || {};
 
   return `
   <div class="card">
@@ -2052,18 +2059,57 @@ function renderChartOfAccounts(){
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div class="section-title">Add Account</div>
+    <div class="section-title">${editing ? `Edit Account — ${escapeHtml(editing.name)}` : 'Add Account'}</div>
+    <input type="hidden" id="accEditingId" value="${accEditingId||''}">
     <div class="grid grid-4">
-      <div class="field"><label>Name</label><input id="acc_name" placeholder="e.g. Electricity Expense"></div>
+      <div class="field"><label>Name</label><input id="acc_name" placeholder="e.g. Electricity Expense" value="${editing?escapeHtml(editing.name):''}"></div>
+      <div class="field"><label>Alias</label><input id="acc_alias" placeholder="Optional" value="${escapeHtml(d.alias||'')}"></div>
       <div class="field"><label>Group</label>
-        <select id="acc_group">${flatGroups().map(g=>`<option value="${g.nature}|${g.group}">${g.group} (${g.nature})</option>`).join("")}</select>
+        <select id="acc_group">${flatGroups().map(g=>`<option value="${g.nature}|${g.group}" ${editing && editing.accGroup===g.group && editing.nature===g.nature?'selected':''}>${g.group} (${g.nature})</option>`).join("")}</select>
       </div>
       <div class="field"><label>Is this a Party (Customer/Vendor)?</label>
-        <select id="acc_isparty"><option value="">No</option><option value="Debtor">Yes — Customer (Debtor)</option><option value="Creditor">Yes — Vendor (Creditor)</option></select>
+        <select id="acc_isparty">
+          <option value="" ${editing && !editing.isParty?'selected':''}>No</option>
+          <option value="Debtor" ${editing && editing.partyType==='Debtor'?'selected':''}>Yes — Customer (Debtor)</option>
+          <option value="Creditor" ${editing && editing.partyType==='Creditor'?'selected':''}>Yes — Vendor (Creditor)</option>
+        </select>
       </div>
-      <div class="field"><label>Opening Balance (₹)</label><input type="number" id="acc_opening" value="0"></div>
+      <div class="field"><label>Opening Balance (₹)</label><input type="number" id="acc_opening" value="${editing?editing.openingBalance:0}"></div>
     </div>
-    <button class="btn gold" id="addAccBtn">Add Account</button>
+
+    <div class="section-title">Mailing Details</div>
+    <div class="grid grid-4">
+      <div class="field"><label>Mailing Name</label><input id="acc_mailingName" value="${escapeHtml(d.mailingName||'')}"></div>
+      <div class="field"><label>Address</label><input id="acc_address" value="${escapeHtml(d.address||'')}"></div>
+      <div class="field"><label>State</label><input id="acc_state" value="${escapeHtml(d.state||'')}"></div>
+      <div class="field"><label>Country</label><input id="acc_country" value="${escapeHtml(d.country||'India')}"></div>
+      <div class="field"><label>Pincode</label><input id="acc_pincode" value="${escapeHtml(d.pincode||'')}"></div>
+      <div class="field"><label>Mobile No.</label><input id="acc_mobile" value="${escapeHtml(d.mobile||'')}"></div>
+    </div>
+
+    <div class="section-title">Tax Registration Details</div>
+    <div class="grid grid-4">
+      <div class="field"><label>PAN/IT No.</label><input id="acc_pan" value="${escapeHtml(d.pan||'')}"></div>
+      <div class="field"><label>Registration Type</label>
+        <select id="acc_regtype">${["Regular","Composition","Unregistered","Consumer"].map(t=>`<option ${d.registrationType===t?'selected':''}>${t}</option>`).join("")}</select>
+      </div>
+      <div class="field"><label>GSTIN/UIN</label><input id="acc_gstin" value="${escapeHtml(d.gstin||'')}"></div>
+    </div>
+
+    <div class="section-title">Banking Details</div>
+    <div class="grid grid-4">
+      <div class="field"><label>A/c Holder's Name</label><input id="acc_bankHolder" value="${escapeHtml(d.bankHolderName||'')}"></div>
+      <div class="field"><label>A/c No.</label><input id="acc_bankAccNo" value="${escapeHtml(d.bankAccountNo||'')}"></div>
+      <div class="field"><label>IFS Code</label><input id="acc_ifsc" value="${escapeHtml(d.ifsc||'')}"></div>
+      <div class="field"><label>SWIFT Code</label><input id="acc_swift" value="${escapeHtml(d.swift||'')}"></div>
+      <div class="field"><label>Bank Name</label><input id="acc_bankName" value="${escapeHtml(d.bankName||'')}"></div>
+      <div class="field"><label>Branch</label><input id="acc_branch" value="${escapeHtml(d.branch||'')}"></div>
+    </div>
+
+    <div class="row">
+      <button class="btn gold" id="addAccBtn">${editing ? 'Save Changes' : 'Add Account'}</button>
+      ${editing ? `<button class="btn ghost" id="cancelAccEditBtn">Cancel Edit</button>` : ''}
+    </div>
   </div>`;
 }
 
@@ -4320,21 +4366,55 @@ function attachHandlers(){
 
     if(booksView==="accounts"){
       document.getElementById("addAccBtn").onclick = async ()=>{
+        const editingId = val("accEditingId");
         const name = val("acc_name").trim();
         if(!name){ toast("Enter an account name.", true); return; }
         const [nature, accGroup] = val("acc_group").split("|");
         const isPartyType = val("acc_isparty");
-        const id = newId("ACC");
-        const row = { id, name, acc_group: accGroup, nature, is_party: !!isPartyType,
-          party_type: isPartyType || null, opening_balance: parseFloat(val("acc_opening"))||0,
-          opening_balance_type: "Dr", is_system: false };
-        const { error } = await sb.from("ledger_accounts").insert(row);
-        if(error){ toast("Could not add account: " + error.message, true); return; }
-        DB.ledgerAccounts.push({id, name, accGroup, nature, isParty:!!isPartyType, partyType:isPartyType||null,
-          openingBalance:row.opening_balance, openingBalanceType:"Dr", isSystem:false});
-        toast("Account added.");
+        const openingBalance = parseFloat(val("acc_opening"))||0;
+        const details = {
+          alias: val("acc_alias").trim(),
+          mailingName: val("acc_mailingName").trim(), address: val("acc_address").trim(),
+          state: val("acc_state").trim(), country: val("acc_country").trim(),
+          pincode: val("acc_pincode").trim(), mobile: val("acc_mobile").trim(),
+          pan: val("acc_pan").trim(), registrationType: val("acc_regtype"), gstin: val("acc_gstin").trim(),
+          bankHolderName: val("acc_bankHolder").trim(), bankAccountNo: val("acc_bankAccNo").trim(),
+          ifsc: val("acc_ifsc").trim(), swift: val("acc_swift").trim(),
+          bankName: val("acc_bankName").trim(), branch: val("acc_branch").trim(),
+        };
+        if(editingId){
+          const row = { name, acc_group: accGroup, nature, is_party: !!isPartyType,
+            party_type: isPartyType || null, opening_balance: openingBalance, details };
+          const { error } = await sb.from("ledger_accounts").update(row).eq("id", editingId);
+          if(error){ toast("Could not update account: " + error.message, true); return; }
+          const idx = DB.ledgerAccounts.findIndex(a=>a.id===editingId);
+          if(idx>-1) DB.ledgerAccounts[idx] = {...DB.ledgerAccounts[idx], name, accGroup, nature,
+            isParty:!!isPartyType, partyType:isPartyType||null, openingBalance, details};
+          await logAudit("update", "ledger_accounts", editingId, {name});
+          toast("Account updated.");
+          accEditingId = null;
+        } else {
+          const id = newId("ACC");
+          const row = { id, name, acc_group: accGroup, nature, is_party: !!isPartyType,
+            party_type: isPartyType || null, opening_balance: openingBalance,
+            opening_balance_type: "Dr", is_system: false, details };
+          const { error } = await sb.from("ledger_accounts").insert(row);
+          if(error){ toast("Could not add account: " + error.message, true); return; }
+          DB.ledgerAccounts.push({id, name, accGroup, nature, isParty:!!isPartyType, partyType:isPartyType||null,
+            openingBalance, openingBalanceType:"Dr", isSystem:false, details});
+          await logAudit("create", "ledger_accounts", id, {name});
+          toast("Account added.");
+        }
         renderAll();
       };
+      document.querySelectorAll(".editAccBtn").forEach(b=>b.onclick=(e)=>{
+        accEditingId = e.target.closest("tr").dataset.id;
+        renderAll();
+        const el = document.getElementById("acc_name");
+        if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+      });
+      const cancelAccEditBtn = document.getElementById("cancelAccEditBtn");
+      if(cancelAccEditBtn) cancelAccEditBtn.onclick = ()=>{ accEditingId = null; renderAll(); };
       document.querySelectorAll(".delAccBtn").forEach(b=>b.onclick=async (e)=>{
         const id = e.target.closest("tr").dataset.id;
         if(DB.voucherLines.some(l=>l.accountId===id)){ toast("Can't delete — this account has transactions. Delete those vouchers first.", true); return; }
@@ -4342,6 +4422,7 @@ function attachHandlers(){
         const { error } = await sb.from("ledger_accounts").delete().eq("id", id);
         if(error){ toast("Could not delete: " + error.message, true); return; }
         DB.ledgerAccounts = DB.ledgerAccounts.filter(a=>a.id!==id);
+        if(accEditingId===id) accEditingId = null;
         toast("Account deleted.");
         renderAll();
       });
