@@ -590,6 +590,18 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
+// Employees' PAN/Aadhar/Bank Account No are only ever shown unmasked to Director/Admin -
+// everyone else (including HR, who can otherwise edit the Employee form) sees the last 4
+// characters only, and cannot overwrite a value they can't see.
+function canSeeSensitiveEmpData(){ return currentRole==="Admin" || currentRole==="Director"; }
+function maskTail(v, tail){
+  tail = tail||4;
+  const s = String(v||"");
+  if(!s) return "";
+  if(s.length<=tail) return "•".repeat(s.length);
+  return "•".repeat(s.length-tail) + s.slice(-tail);
+}
+
 // ============================= MINI CHARTS (inline SVG, no external library) =============================
 const CHART_COLORS = ["#1B2454","#C08A2E","#1E8E5A","#B4530F","#8FA0D0","#B33636"];
 function svgBarChart(items, opts){
@@ -1517,6 +1529,7 @@ function renderEmployees(){
       <div class="field"><label>Starting Other Allowance (₹)</label><input type="number" id="f_other" value="0"></div>
     </div>
     <div class="section-title">Additional Details</div>
+    ${!canSeeSensitiveEmpData() ? `<p class="helptext">PAN, Aadhar and Bank A/c No. are masked and locked for your role - only Director/Admin can view or change an existing value. Blank fields can still be filled in.</p>` : ''}
     <div class="grid grid-4">
       <div class="field"><label>PAN</label><input id="f_pan"></div>
       <div class="field"><label>Aadhar</label><input id="f_aadhar"></div>
@@ -4575,9 +4588,10 @@ const REPORT_DEFS = {
           const other = s ? (s.components||[]).reduce((a,c)=>a+c.amount,0) : (e.other||0);
           const d = e.details||{};
           const ob = onboardingProgress(e);
+          const canSee = canSeeSensitiveEmpData();
           return [e.id,e.name,e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,basic,hra,other,basic+hra+other,
-            d.pan||'',d.aadhar||'',d.address||'',d.emergencyContactName||'',d.emergencyContactPhone||'',
-            d.bankAccountName||'',d.bankAccountNo||'',d.ifsc||'',d.bankName||'',`${ob.done}/${ob.total}`];
+            canSee?(d.pan||''):maskTail(d.pan),canSee?(d.aadhar||''):maskTail(d.aadhar),d.address||'',d.emergencyContactName||'',d.emergencyContactPhone||'',
+            d.bankAccountName||'',canSee?(d.bankAccountNo||''):maskTail(d.bankAccountNo),d.ifsc||'',d.bankName||'',`${ob.done}/${ob.total}`];
         });
     }
   },
@@ -5144,13 +5158,15 @@ function attachHandlers(){
       document.getElementById("salaryFieldsGroup").style.display = "none";
       document.getElementById("salaryFieldsNote").style.display = "block";
       const d = emp.details || {};
-      document.getElementById("f_pan").value = d.pan||"";
-      document.getElementById("f_aadhar").value = d.aadhar||"";
+      const canSee = canSeeSensitiveEmpData();
+      const panEl = document.getElementById("f_pan"), aadharEl = document.getElementById("f_aadhar"), bankAccEl = document.getElementById("f_bankAccNo");
+      panEl.value = canSee ? (d.pan||"") : maskTail(d.pan); panEl.readOnly = !canSee && !!d.pan;
+      aadharEl.value = canSee ? (d.aadhar||"") : maskTail(d.aadhar); aadharEl.readOnly = !canSee && !!d.aadhar;
+      bankAccEl.value = canSee ? (d.bankAccountNo||"") : maskTail(d.bankAccountNo); bankAccEl.readOnly = !canSee && !!d.bankAccountNo;
       document.getElementById("f_address").value = d.address||"";
       document.getElementById("f_emergencyName").value = d.emergencyContactName||"";
       document.getElementById("f_emergencyPhone").value = d.emergencyContactPhone||"";
       document.getElementById("f_bankHolder").value = d.bankAccountName||"";
-      document.getElementById("f_bankAccNo").value = d.bankAccountNo||"";
       document.getElementById("f_ifsc").value = d.ifsc||"";
       document.getElementById("f_bankName").value = d.bankName||"";
       document.getElementById("cancelEmpBtn").style.display = "inline-block";
@@ -5192,11 +5208,18 @@ function attachHandlers(){
       const doj = val("f_doj") || "2026-01-01", resignDate = val("f_resign") || "";
       if(resignDate && resignDate < doj){ toast("Resigning Date cannot be before Date of Joining.", true); return; }
       const existingEmp = editingId ? DB.employees.find(x=>x.id===editingId) : null;
+      const existingDetails = existingEmp ? (existingEmp.details||{}) : {};
+      // Fields locked read-only (masked, non-Director/Admin viewing an existing value) never get
+      // overwritten with their own masked placeholder - the underlying real value is kept as-is.
+      const panEl = document.getElementById("f_pan"), aadharEl = document.getElementById("f_aadhar"), bankAccEl = document.getElementById("f_bankAccNo");
       const details = {
-        ...(existingEmp ? existingEmp.details : {}), // preserves onboarding checklist - this form never touches it
-        pan: val("f_pan").trim(), aadhar: val("f_aadhar").trim(), address: val("f_address").trim(),
+        ...existingDetails, // preserves onboarding checklist - this form never touches it
+        pan: panEl.readOnly ? (existingDetails.pan||"") : val("f_pan").trim(),
+        aadhar: aadharEl.readOnly ? (existingDetails.aadhar||"") : val("f_aadhar").trim(),
+        address: val("f_address").trim(),
         emergencyContactName: val("f_emergencyName").trim(), emergencyContactPhone: val("f_emergencyPhone").trim(),
-        bankAccountName: val("f_bankHolder").trim(), bankAccountNo: val("f_bankAccNo").trim(),
+        bankAccountName: val("f_bankHolder").trim(),
+        bankAccountNo: bankAccEl.readOnly ? (existingDetails.bankAccountNo||"") : val("f_bankAccNo").trim(),
         ifsc: val("f_ifsc").trim(), bankName: val("f_bankName").trim(),
       };
       const record = {
