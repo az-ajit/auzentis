@@ -278,8 +278,17 @@ const DEFAULT_SETTINGS = {
   ptSlab1:7500, ptAmt1:0, ptSlab2:10000, ptAmt2:175, ptAmt3:200,
   casualLeaveQuota:12, sickLeaveQuota:8, earnedLeaveQuota:15,
   officeLat: null, officeLng: null, officeRadiusM: 150,
-  championAmounts: {first:5000, second:3000, third:2000, eom:0} // default amounts for the fully-manual monthly Champion Bonus / Employee of the Month awards, editable per month in Payroll
+  championAmounts: {first:5000, second:3000, third:2000, eom:0}, // default amounts for the fully-manual monthly Champion Bonus / Employee of the Month awards, editable per month in Payroll
+  showSignatureOnPayslip: true // company-wide default; individual employees can override via employees.signatureOverride
 };
+
+// Whether the signature/stamp block should appear on this employee's payslip:
+// their own override wins if set, otherwise the company-wide default applies.
+function payslipSignatureVisible(emp){
+  if(emp && emp.signatureOverride === "show") return true;
+  if(emp && emp.signatureOverride === "hide") return false;
+  return DB.settings.showSignatureOnPayslip !== false;
+}
 
 const SEED_EMPLOYEES = [
   {id:"AZ001",name:"Shivraj",doj:"2026-06-22",status:"Active",basic:7500,hra:3000,other:4500},
@@ -313,8 +322,8 @@ const SEED_PAYROLL = [
 // ============================= TABLE MAPPINGS (JS <-> Postgres) =============================
 const TABLE_CONFIG = {
   employees:    { table:"employees",
-    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null,is_remote:!!e.isRemote}),
-    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||'',isRemote:!!r.is_remote}) },
+    toRow:e=>({id:e.id,name:e.name,doj:e.doj,status:e.status,basic:e.basic,hra:e.hra,other:e.other,email:e.email||null,dob:e.dob||null,resign_date:e.resignDate||null,is_remote:!!e.isRemote,signature_override:e.signatureOverride||null}),
+    fromRow:r=>({id:r.id,name:r.name,doj:r.doj,status:r.status,basic:Number(r.basic),hra:Number(r.hra),other:Number(r.other),email:r.email||'',dob:r.dob||'',resignDate:r.resign_date||'',isRemote:!!r.is_remote,signatureOverride:r.signature_override||''}) },
   payroll:      { table:"payroll",
     toRow:p=>({id:p.id,month:p.month,year:p.year,emp_id:p.empId,leaves:p.leaves,tds:p.tds,lop_hours:p.lopHours||0,
       quality:(p.quality===null||p.quality===undefined)?null:p.quality,
@@ -1215,6 +1224,14 @@ function renderSettings(){
     <button class="btn gold" id="saveSettingsBtn">Save Settings</button>
   </div>
   <div class="card">
+    <h2>Payslip Signature</h2>
+    <div class="sub">Company-wide default for whether the signature & stamp appear on payslips — handy for temporarily removing it. Individual employees can be overridden either way from Employees → Edit → Payslip Signature.</div>
+    <div class="field" style="max-width:360px;">
+      <label><input type="checkbox" id="showSignatureOnPayslip" ${s.showSignatureOnPayslip!==false?'checked':''}> Show signature & stamp on payslips by default</label>
+    </div>
+    <button class="btn gold" id="saveSignatureSettingBtn">Save</button>
+  </div>
+  <div class="card">
     <h2>Office Location (Attendance Restriction)</h2>
     <div class="sub">Employees must enroll their fingerprint (on their own phone/laptop) and be within this radius of the office to Punch In/Out. You (Admin/Director) are never restricted — you can access from anywhere.</div>
     <p class="helptext">
@@ -1403,6 +1420,7 @@ function renderEmployees(){
       <div class="field"><label>Resigning Date (optional)</label><input type="date" id="f_resign"></div>
       <div class="field"><label>Status</label><select id="f_status"><option>Active</option><option>Inactive</option></select></div>
       <div class="field"><label>Work From Home</label><select id="f_remote"><option value="">Office (GPS required)</option><option value="1">Remote-eligible (skips office GPS check)</option></select></div>
+      <div class="field"><label>Payslip Signature</label><select id="f_signature"><option value="">Default (follow company setting)</option><option value="show">Always show</option><option value="hide">Always hide</option></select></div>
     </div>
     <p class="helptext" id="salaryFieldsNote" style="display:none;">Salary is managed in the Salary Structure panel below — click "Salary" on this employee's row.</p>
     <div class="grid grid-4" id="salaryFieldsGroup">
@@ -2490,7 +2508,7 @@ function renderPayslip(){
           <tr class="net"><td colspan="3">NET PAY</td><td class="num">₹ ${fmt(calc.netPay)}</td></tr>
         </tfoot>
       </table>
-      ${(SIGNATURE_IMG || STAMP_IMG) ? `
+      ${(payslipSignatureVisible(calc.emp) && (SIGNATURE_IMG || STAMP_IMG)) ? `
       <div style="display:flex;justify-content:flex-end;align-items:flex-end;gap:16px;margin-top:26px;">
         ${STAMP_IMG ? `<img src="${STAMP_IMG}" style="height:80px;width:auto;" alt="Company Stamp">` : ''}
         ${SIGNATURE_IMG ? `<div style="text-align:center;">
@@ -3686,6 +3704,14 @@ function attachHandlers(){
       toast("Settings saved.");
     };
 
+    const saveSignatureSettingBtn = document.getElementById("saveSignatureSettingBtn");
+    if(saveSignatureSettingBtn) saveSignatureSettingBtn.onclick = async ()=>{
+      DB.settings = { ...DB.settings, showSignatureOnPayslip: document.getElementById("showSignatureOnPayslip").checked };
+      await save("settings");
+      await logAudit("update", "settings", null, {showSignatureOnPayslip: DB.settings.showSignatureOnPayslip});
+      toast("Payslip signature setting saved.");
+    };
+
     document.getElementById("useMyLocationBtn").onclick = ()=>{
       if(!navigator.geolocation){ toast("Your browser doesn't support location.", true); return; }
       const btn = document.getElementById("useMyLocationBtn");
@@ -3847,6 +3873,7 @@ function attachHandlers(){
       document.getElementById("f_resign").value = emp.resignDate||"";
       document.getElementById("f_status").value = emp.status;
       document.getElementById("f_remote").value = emp.isRemote ? "1" : "";
+      document.getElementById("f_signature").value = emp.signatureOverride || "";
       document.getElementById("f_basic").value = emp.basic;
       document.getElementById("f_hra").value = emp.hra;
       document.getElementById("f_other").value = emp.other;
@@ -3887,7 +3914,7 @@ function attachHandlers(){
       const record = {
         id, name, doj, status: val("f_status"),
         dob: val("f_dob") || "", email: val("f_email").trim() || "", resignDate,
-        basic, hra, other, isRemote: val("f_remote")==="1"
+        basic, hra, other, isRemote: val("f_remote")==="1", signatureOverride: val("f_signature")
       };
       if(editingId){
         const idx = DB.employees.findIndex(x=>x.id===editingId);
