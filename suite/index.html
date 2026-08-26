@@ -246,7 +246,7 @@ const ROLE_TABS = {
   "HR": ["Dashboard","Employees","Attendance","Leaves","Payroll","Payments","Payslip","Reports"],
   "Accounts": ["Dashboard","Settings","Payroll","Payments","Payslip","Books","Reports"],
   "Sales": ["Dashboard","CRM","Reports"],
-  "Employee": ["Dashboard","Attendance"]
+  "Employee": ["Dashboard","Attendance","My Profile"]
 };
 let currentRole = "Admin";
 let currentEmpId = null; // used to scope "Employee" role to one person
@@ -883,6 +883,7 @@ function renderAll(){
   else if(activeTab==="Payslip") main.innerHTML = renderPayslip();
   else if(activeTab==="Books") main.innerHTML = renderBooks();
   else if(activeTab==="Attendance") main.innerHTML = renderAttendance();
+  else if(activeTab==="My Profile") main.innerHTML = renderMyProfile();
   else if(activeTab==="Leaves") main.innerHTML = renderLeaves();
   else if(activeTab==="CRM") main.innerHTML = renderCRM();
   else if(activeTab==="Reports") main.innerHTML = renderReports();
@@ -3903,6 +3904,41 @@ function renderAttendance(){
   </div>`;
 }
 
+// ============================= MY PROFILE (self-service) =============================
+// Deliberately limited to the same KYC/bank fields HR can edit from
+// Employees - never salary, status, or the onboarding checklist. Saved via
+// the update-my-details Edge Function, which enforces server-side that the
+// caller can only touch their own employee row and only these fields -
+// this page's own field list is just for display, not a security boundary.
+function renderMyProfile(){
+  const emp = DB.employees.find(e=>e.id===currentEmpId);
+  if(!emp){
+    return `<div class="card"><div class="empty">Your login isn't linked to an employee record yet. Ask your Admin to link you in the Team tab.</div></div>`;
+  }
+  const d = emp.details || {};
+  return `
+  <div class="card">
+    <h2>My Profile</h2>
+    <div class="sub">Keep your own details up to date - HR uses this for payroll and records. Changes save straight to your employee record.</div>
+    <div class="section-title">Personal Details</div>
+    <div class="grid grid-4">
+      <div class="field"><label>PAN</label><input id="mp_pan" value="${escapeHtml(d.pan||'')}"></div>
+      <div class="field"><label>Aadhar</label><input id="mp_aadhar" value="${escapeHtml(d.aadhar||'')}"></div>
+      <div class="field" style="grid-column:span 2;"><label>Address</label><input id="mp_address" value="${escapeHtml(d.address||'')}"></div>
+      <div class="field"><label>Emergency Contact Name</label><input id="mp_emergencyName" value="${escapeHtml(d.emergencyContactName||'')}"></div>
+      <div class="field"><label>Emergency Contact Phone</label><input id="mp_emergencyPhone" value="${escapeHtml(d.emergencyContactPhone||'')}"></div>
+    </div>
+    <div class="section-title">Bank Details (for salary payment)</div>
+    <div class="grid grid-4">
+      <div class="field"><label>A/c Holder's Name</label><input id="mp_bankHolder" value="${escapeHtml(d.bankAccountName||'')}"></div>
+      <div class="field"><label>A/c No.</label><input id="mp_bankAccNo" value="${escapeHtml(d.bankAccountNo||'')}"></div>
+      <div class="field"><label>IFSC</label><input id="mp_ifsc" value="${escapeHtml(d.ifsc||'')}"></div>
+      <div class="field"><label>Bank Name</label><input id="mp_bankName" value="${escapeHtml(d.bankName||'')}"></div>
+    </div>
+    <button class="btn gold" id="saveMyProfileBtn">Save</button>
+  </div>`;
+}
+
 function renderMyAttendance(){
   const emp = DB.employees.find(e=>e.id===currentEmpId);
   if(!emp){
@@ -6195,6 +6231,32 @@ function attachHandlers(){
         renderAll();
       });
     }
+  }
+
+  if(activeTab==="My Profile"){
+    const saveMyProfileBtn = document.getElementById("saveMyProfileBtn");
+    if(saveMyProfileBtn) saveMyProfileBtn.onclick = async ()=>{
+      saveMyProfileBtn.disabled = true; saveMyProfileBtn.textContent = "Saving...";
+      try{
+        const patch = {
+          pan: val("mp_pan").trim(), aadhar: val("mp_aadhar").trim(), address: val("mp_address").trim(),
+          emergencyContactName: val("mp_emergencyName").trim(), emergencyContactPhone: val("mp_emergencyPhone").trim(),
+          bankAccountName: val("mp_bankHolder").trim(), bankAccountNo: val("mp_bankAccNo").trim(),
+          ifsc: val("mp_ifsc").trim(), bankName: val("mp_bankName").trim(),
+        };
+        const { data, error } = await sb.functions.invoke("update-my-details", { body: patch });
+        if(error){ toast("Could not save: " + (await extractFnError(error)), true); return; }
+        if(data && data.error){ toast(data.error, true); return; }
+        const emp = DB.employees.find(e=>e.id===currentEmpId);
+        if(emp) emp.details = {...(emp.details||{}), ...patch};
+        toast("Profile saved.");
+      }catch(err){
+        console.error(err);
+        toast("Could not save: " + err.message, true);
+      }finally{
+        saveMyProfileBtn.disabled = false; saveMyProfileBtn.textContent = "Save";
+      }
+    };
   }
 
   if(activeTab==="Attendance"){
