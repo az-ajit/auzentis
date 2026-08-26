@@ -269,7 +269,8 @@ let DB = {
   vouchers: [],       // Sales/Purchase/Payment/Receipt/Journal/Contra
   voucherLines: [],   // double-entry Dr/Cr lines per voucher
   salaryStructures: [], // {id,empId,effMonth,effYear,basic,hra,components:[{name,amount}],bonusPlanId} — full revision history, never overwritten
-  bonusPlans: [] // {id,name,rules:[{id,name,type:"attendance"|"quality"|"production",amount,tiers,slabs}]} — named, assignable per employee via salaryStructures.bonusPlanId, so different employees/clients can run different plans at once
+  bonusPlans: [], // {id,name,rules:[{id,name,type:"attendance"|"quality"|"production",amount,tiers,slabs}]} — named, assignable per employee via salaryStructures.bonusPlanId, so different employees/clients can run different plans at once
+  billAllocations: [] // {id,voucherId,billVoucherId,amount} — bill-wise settlement: which Payment/Receipt voucher paid how much of which Sales/Purchase bill, Tally-style
 };
 
 const DEFAULT_SETTINGS = {
@@ -361,7 +362,10 @@ const TABLE_CONFIG = {
     fromRow:r=>({id:r.id,empId:r.emp_id,effMonth:r.eff_month,effYear:r.eff_year,basic:Number(r.basic),hra:Number(r.hra),components:r.components||[],bonusPlanId:r.bonus_plan_id||null}) },
   bonusPlans: { table:"bonus_plans",
     toRow:p=>({id:p.id,name:p.name,rules:p.rules||[]}),
-    fromRow:r=>({id:r.id,name:r.name,rules:r.rules||[]}) }
+    fromRow:r=>({id:r.id,name:r.name,rules:r.rules||[]}) },
+  billAllocations: { table:"bill_allocations",
+    toRow:a=>({id:a.id,voucher_id:a.voucherId,bill_voucher_id:a.billVoucherId,amount:a.amount}),
+    fromRow:r=>({id:r.id,voucherId:r.voucher_id,billVoucherId:r.bill_voucher_id,amount:Number(r.amount)}) }
 };
 
 // ============================= AUTH =============================
@@ -1952,6 +1956,12 @@ async function deleteVoucher(voucherId){
     if(lErr){ toast("Could not delete: " + lErr.message, true); return; }
     const { error: vErr } = await sb.from("vouchers").delete().eq("id", voucherId);
     if(vErr){ toast("Could not delete: " + vErr.message, true); return; }
+    // A voucher can be referenced by bill_allocations either as the
+    // Payment/Receipt that did the settling or as the Sales/Purchase bill
+    // being settled — clean up both directions so no orphaned allocations
+    // point at a deleted voucher.
+    await sb.from("bill_allocations").delete().or(`voucher_id.eq.${voucherId},bill_voucher_id.eq.${voucherId}`);
+    DB.billAllocations = DB.billAllocations.filter(a=>a.voucherId!==voucherId && a.billVoucherId!==voucherId);
     DB.voucherLines = DB.voucherLines.filter(l=>l.voucherId!==voucherId);
     DB.vouchers = DB.vouchers.filter(v=>v.id!==voucherId);
     toast("Voucher deleted.");
@@ -1989,6 +1999,41 @@ function ageParty(accountId, asOfDate){
     total += inc.remaining;
   });
   return {buckets, total};
+}
+
+// ============================= BILL-WISE TRACKING (Tally-style) =============================
+// The original amount of a Sales/Purchase "bill" — the party-side line of
+// that voucher, on whichever side increases the party's balance (Dr for a
+// Debtor/Asset, Cr for a Creditor/Liability).
+function billOriginalAmount(voucherId, accountId){
+  const acc = DB.ledgerAccounts.find(a=>a.id===accountId);
+  const increaseOnDebit = acc && acc.nature === "Asset";
+  const line = DB.voucherLines.find(l=>l.voucherId===voucherId && l.accountId===accountId);
+  if(!line) return 0;
+  return increaseOnDebit ? (line.debit||0) : (line.credit||0);
+}
+
+// Every Sales/Purchase bill for this party that still has an outstanding
+// balance after subtracting whatever's been explicitly allocated against it
+// via bill_allocations (excludeVoucherId lets a Payment/Receipt being edited
+// exclude its own prior allocations from the outstanding calc).
+function openBillsForParty(partyId, excludeVoucherId){
+  const billVouchers = DB.vouchers.filter(v=>v.partyId===partyId && (v.voucherType==="Sales" || v.voucherType==="Purchase"));
+  return billVouchers.map(v=>{
+    const original = billOriginalAmount(v.id, partyId);
+    const allocated = DB.billAllocations.filter(a=>a.billVoucherId===v.id && a.voucherId!==excludeVoucherId).reduce((s,a)=>s+a.amount,0);
+    return { voucher:v, original, allocated, outstanding: round2(original - allocated) };
+  }).filter(b=>b.outstanding > 0.01).sort((a,b)=>a.voucher.date.localeCompare(b.voucher.date));
+}
+
+// Bill references a Payment/Receipt voucher was allocated against, for
+// display (e.g. "Agst BCA-0012") — empty if it was recorded as an advance/
+// on-account with no specific bill selected.
+function billAllocationsForVoucher(voucherId){
+  return DB.billAllocations.filter(a=>a.voucherId===voucherId).map(a=>{
+    const bill = DB.vouchers.find(v=>v.id===a.billVoucherId);
+    return { ...a, billVoucherNo: bill ? bill.voucherNo : "(deleted bill)" };
+  });
 }
 
 // ============================= BOOKS (Chart of Accounts, Vouchers, Reports) =============================
@@ -2231,10 +2276,46 @@ function voucherFormSalesPurchase(type){
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
 }
 
+// Which party/account is currently selected in the Payment/Receipt form's
+// "Pay To"/"Receive From" dropdown, and the draft bill-wise allocation
+// amounts keyed by bill voucher id — both persisted across re-renders
+// triggered by changing the target or clicking Auto-allocate/Clear (typing
+// directly into a bill's amount field doesn't re-render, so it never needs
+// syncing back into this draft — it's read straight from the DOM on Save).
+let voucherPayRecTarget = null;
+let paymentBillAllocDraft = {};
+
 function voucherFormPaymentReceipt(type){
   const isPayment = type==="Payment";
   const partyList = parties(isPayment?"Creditor":"Debtor");
   const otherAccts = isPayment ? incomeExpenseAccounts("Expense") : incomeExpenseAccounts("Income");
+  if(voucherPayRecTarget===null){
+    voucherPayRecTarget = partyList.length ? `party:${partyList[0].id}` : (otherAccts.length ? `acct:${otherAccts[0].id}` : "");
+  }
+  const [targetKind, targetId] = (voucherPayRecTarget||"").split(":");
+  const bills = targetKind==="party" ? openBillsForParty(targetId) : [];
+  const allocatedTotal = round2(bills.reduce((s,b)=>s+(paymentBillAllocDraft[b.voucher.id]||0),0));
+
+  const billSectionHtml = targetKind!=="party" ? '' : (bills.length ? `
+    <div class="section-title">Bill-wise Allocation (optional — leave unallocated to record as an advance/on-account)</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Date</th><th>Bill</th><th>Outstanding</th><th>Allocate (₹)</th></tr></thead>
+        <tbody>${bills.map(b=>`
+          <tr>
+            <td>${b.voucher.date}</td><td>${b.voucher.voucherType} ${b.voucher.voucherNo}</td>
+            <td class="num">${fmt(b.outstanding)}</td>
+            <td class="num"><input type="number" min="0" class="billAllocInput" data-bill="${b.voucher.id}" value="${paymentBillAllocDraft[b.voucher.id]||0}"></td>
+          </tr>`).join("")}</tbody>
+      </table>
+    </div>
+    <div class="row">
+      <button type="button" class="btn ghost sm" id="autoAllocBillsBtn">Auto-allocate oldest first</button>
+      <button type="button" class="btn ghost sm" id="clearBillAllocBtn">Clear allocations</button>
+    </div>
+    <p class="helptext">Allocated so far: ₹${fmt(allocatedTotal)}. This can be less than the Amount above — the remainder is recorded as an advance/on-account.</p>
+  ` : `<p class="helptext">No open bills for this party — this ${type.toLowerCase()} will be recorded as an advance/on-account.</p>`);
+
   return `
     <div class="grid grid-4">
       <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
@@ -2244,16 +2325,17 @@ function voucherFormPaymentReceipt(type){
       <div class="field"><label>${isPayment?"Pay To":"Receive From"}</label>
         <select id="v_target">
           <optgroup label="${isPayment?'Vendors (settle a payable)':'Customers (settle a receivable)'}">
-            ${partyList.map(p=>`<option value="party:${p.id}">${p.name}</option>`).join("")}
+            ${partyList.map(p=>`<option value="party:${p.id}" ${voucherPayRecTarget===`party:${p.id}`?'selected':''}>${p.name}</option>`).join("")}
           </optgroup>
           <optgroup label="${isPayment?'Direct Expense':'Direct Income'}">
-            ${otherAccts.map(a=>`<option value="acct:${a.id}">${a.name}</option>`).join("")}
+            ${otherAccts.map(a=>`<option value="acct:${a.id}" ${voucherPayRecTarget===`acct:${a.id}`?'selected':''}>${a.name}</option>`).join("")}
           </optgroup>
         </select>
       </div>
       <div class="field"><label>Amount (₹)</label><input type="number" id="v_amount" value="0"></div>
       <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
     </div>
+    ${billSectionHtml}
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
 }
 
@@ -2315,10 +2397,23 @@ function renderPartyLedgers(){
   if(booksPartyId){
     const postings = getAllPostings().filter(p=>p.accountId===booksPartyId);
     let running = 0;
-    const rows = postings.map(p=>{ running += (p.debit||0)-(p.credit||0); return `<tr><td>${p.date}</td><td>${p.voucherNo}</td><td>${p.particulars}</td><td class="num">${p.debit?fmt(p.debit):''}</td><td class="num">${p.credit?fmt(p.credit):''}</td><td class="num">${fmt(running)}</td></tr>`; }).join("");
+    const rows = postings.map(p=>{
+      running += (p.debit||0)-(p.credit||0);
+      const allocs = p.voucherId ? billAllocationsForVoucher(p.voucherId) : [];
+      const agstRef = allocs.length ? allocs.map(a=>`Agst ${a.billVoucherNo}: ${fmt0(a.amount)}`).join(", ") : (p.voucherType==="Payment"||p.voucherType==="Receipt" ? "On Account" : "");
+      return `<tr><td>${p.date}</td><td>${p.voucherNo}</td><td>${p.particulars}</td><td>${agstRef}</td><td class="num">${p.debit?fmt(p.debit):''}</td><td class="num">${p.credit?fmt(p.credit):''}</td><td class="num">${fmt(running)}</td></tr>`;
+    }).join("");
     detail = `<div class="card"><h2>Ledger — ${accName(booksPartyId)}</h2>
-      <div class="tablewrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6" class="empty">No transactions yet.</td></tr>`}</tbody></table></div></div>`;
+      <div class="tablewrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th>Agst Ref</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions yet.</td></tr>`}</tbody></table></div></div>`;
+
+    const openBills = openBillsForParty(booksPartyId);
+    const billRows = openBills.map(b=>`<tr><td>${b.voucher.date}</td><td>${b.voucher.voucherType} ${b.voucher.voucherNo}</td>
+      <td class="num">${fmt(b.original)}</td><td class="num">${fmt(b.allocated)}</td><td class="num"><b>${fmt(b.outstanding)}</b></td></tr>`).join("");
+    detail += `<div class="card"><h2>Bill-wise Outstanding — ${accName(booksPartyId)}</h2>
+      <div class="sub">Every open Sales/Purchase bill for this party and how much of it is still unsettled, based on explicit bill-wise allocations made on Payment/Receipt vouchers.</div>
+      <div class="tablewrap"><table><thead><tr><th>Date</th><th>Bill</th><th>Original</th><th>Settled</th><th>Outstanding</th></tr></thead>
+      <tbody>${billRows || `<tr><td colspan="5" class="empty">No open bills.</td></tr>`}</tbody></table></div></div>`;
   }
 
   return `
@@ -4429,7 +4524,11 @@ function attachHandlers(){
     }
 
     if(booksView==="vouchers"){
-      document.querySelectorAll(".voucherTypeBtn").forEach(b=>b.onclick=()=>{ voucherType = b.dataset.type; renderAll(); });
+      document.querySelectorAll(".voucherTypeBtn").forEach(b=>b.onclick=()=>{
+        voucherType = b.dataset.type;
+        voucherPayRecTarget = null; paymentBillAllocDraft = {};
+        renderAll();
+      });
       document.getElementById("loadDayBookBtn").onclick = ()=>{
         booksDayRange = {from: val("db_from"), to: val("db_to")}; renderAll();
       };
@@ -4465,6 +4564,31 @@ function attachHandlers(){
         await deleteVoucher(id);
         renderAll();
       });
+
+      if(voucherType==="Payment" || voucherType==="Receipt"){
+        const targetSel = document.getElementById("v_target");
+        if(targetSel) targetSel.onchange = (e)=>{
+          voucherPayRecTarget = e.target.value;
+          paymentBillAllocDraft = {};
+          renderAll();
+        };
+        const autoAllocBtn = document.getElementById("autoAllocBillsBtn");
+        if(autoAllocBtn) autoAllocBtn.onclick = ()=>{
+          const [targetKind, targetId] = (voucherPayRecTarget||"").split(":");
+          if(targetKind!=="party") return;
+          let remaining = parseFloat(val("v_amount"))||0;
+          paymentBillAllocDraft = {};
+          for(const b of openBillsForParty(targetId)){
+            if(remaining<=0) break;
+            const alloc = Math.min(b.outstanding, remaining);
+            paymentBillAllocDraft[b.voucher.id] = alloc;
+            remaining -= alloc;
+          }
+          renderAll();
+        };
+        const clearAllocBtn = document.getElementById("clearBillAllocBtn");
+        if(clearAllocBtn) clearAllocBtn.onclick = ()=>{ paymentBillAllocDraft = {}; renderAll(); };
+      }
 
       if(voucherType==="Journal"){
         document.getElementById("jrAddRowBtn").onclick = ()=>{ journalRows.push({account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0}); renderAll(); };
@@ -4512,6 +4636,25 @@ function attachHandlers(){
           const amount = parseFloat(val("v_amount"))||0;
           if(!target || amount<=0){ toast("Choose who to pay/receive from and enter a positive amount.", true); return; }
           const [targetKind, targetId] = target.split(":");
+
+          let billAllocs = [];
+          if(targetKind==="party"){
+            const openBills = openBillsForParty(targetId);
+            billAllocs = Array.from(document.querySelectorAll(".billAllocInput"))
+              .map(inp=>({billVoucherId: inp.dataset.bill, amount: parseFloat(inp.value)||0}))
+              .filter(a=>a.amount>0);
+            if(billAllocs.some(a=>a.amount<0)){ toast("Bill allocations cannot be negative.", true); return; }
+            const allocTotal = round2(billAllocs.reduce((s,a)=>s+a.amount,0));
+            if(allocTotal > amount + 0.01){ toast(`Bill allocations (₹${fmt(allocTotal)}) can't exceed the voucher Amount (₹${fmt(amount)}).`, true); return; }
+            for(const a of billAllocs){
+              const bill = openBills.find(b=>b.voucher.id===a.billVoucherId);
+              if(bill && a.amount > bill.outstanding + 0.01){
+                toast(`Allocation to ${bill.voucher.voucherNo} (₹${fmt(a.amount)}) exceeds its outstanding balance (₹${fmt(bill.outstanding)}).`, true);
+                return;
+              }
+            }
+          }
+
           voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date,
             partyId: targetKind==="party" ? targetId : null, narration};
           if(kind==="Payment"){
@@ -4519,6 +4662,7 @@ function attachHandlers(){
           } else {
             lines = [{accountId:cashBankId, debit:amount, credit:0}, {accountId:targetId, debit:0, credit:amount}];
           }
+          voucher._billAllocs = billAllocs; // consumed right after saveVoucher below, not persisted on the voucher itself
         } else if(kind==="Contra"){
           const from = val("v_from"), to = val("v_to");
           const amount = parseFloat(val("v_amount"))||0;
@@ -4532,10 +4676,16 @@ function attachHandlers(){
             .map(r=>({accountId:r.account, debit:parseFloat(r.debit)||0, credit:parseFloat(r.credit)||0}));
         }
 
+        const billAllocs = voucher._billAllocs; delete voucher._billAllocs;
         const ok = await saveVoucher(voucher, lines);
         if(ok){
+          if(billAllocs && billAllocs.length){
+            billAllocs.forEach(a=> DB.billAllocations.push({id:newId("BA"), voucherId:voucher.id, billVoucherId:a.billVoucherId, amount:a.amount}));
+            await save("billAllocations");
+          }
           toast(kind + " voucher saved.");
           if(kind==="Journal") journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
+          voucherPayRecTarget = null; paymentBillAllocDraft = {};
           renderAll();
         }
       };
