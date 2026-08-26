@@ -1697,9 +1697,9 @@ function renderEmployees(){
       <button class="btn ghost" id="cancelEmpBtn" style="display:none;">Cancel Edit</button>
     </div>
   </div>
-  <details class="collapse-card"><summary>Salary Structure<span class="sub">Current pay, revision history and bonus plan assignment.</span></summary><div class="collapse-body">${renderSalaryStructureCard()}</div></details>
-  <details class="collapse-card"><summary>Onboarding Checklists<span class="sub">Per-employee onboarding progress tracking.</span></summary><div class="collapse-body">${renderOnboardingCard()}</div></details>
-  <details class="collapse-card"><summary>Offer, Appointment &amp; Relieving Letters<span class="sub">Generate and email HR documents.</span></summary><div class="collapse-body">${renderOfferLetterCard()}</div></details>`;
+  <details class="collapse-card" id="salaryDetailsCard" ${empSalaryDetailsOpen?'open':''}><summary>Salary Structure<span class="sub">Current pay, revision history and bonus plan assignment.</span></summary><div class="collapse-body">${renderSalaryStructureCard()}</div></details>
+  <details class="collapse-card" id="onboardDetailsCard" ${empOnboardDetailsOpen?'open':''}><summary>Onboarding Checklists<span class="sub">Per-employee onboarding progress tracking.</span></summary><div class="collapse-body">${renderOnboardingCard()}</div></details>
+  <details class="collapse-card" id="letterDetailsCard" ${empLetterDetailsOpen?'open':''}><summary>Offer, Appointment &amp; Relieving Letters<span class="sub">Generate and email HR documents.</span></summary><div class="collapse-body">${renderOfferLetterCard()}</div></details>`;
 }
 
 // ============================= SALARY STRUCTURE =============================
@@ -1707,6 +1707,9 @@ function renderEmployees(){
 // effective from a chosen month (never earlier than the current month, so
 // past payroll and payslips can never change). computePayroll() always looks
 // up whichever structure was actually in force for the period being paid.
+let empSalaryDetailsOpen = false;
+let empOnboardDetailsOpen = false;
+let empLetterDetailsOpen = false;
 let salStructEmpId = null;
 let salStructDraftBasic = 0;
 let salStructDraftHra = 0;
@@ -2676,6 +2679,8 @@ let booksView = "vouchers";
 let voucherType = "Sales";
 let journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
 let booksDayRange = null;
+let booksDayBookOpen = false;
+let booksCsvImportOpen = false;
 let booksAsOf = null;
 let booksPnlRange = null;
 let booksPartyId = null;
@@ -2731,9 +2736,15 @@ function renderBooksGuide(){
 }
 
 function renderBooks(){
-  const views = [["vouchers","Vouchers"],["items","Stock Items"],["stock","Stock Summary"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["reconcile","Bank Reconciliation"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
-  const nav = `<div class="row" style="margin-bottom:14px;">${views.map(([k,l])=>
-    `<button class="btn ${booksView===k?'gold':'ghost'} sm booksNavBtn" data-view="${k}">${l}</button>`).join("")}</div>`;
+  const navGroups = [
+    { label: null, views: [["vouchers","Vouchers"]] },
+    { label: "Masters", views: [["items","Stock Items"],["accounts","Chart of Accounts"],["parties","Party Ledgers"]] },
+    { label: "Reports", views: [["stock","Stock Summary"],["reconcile","Bank Reconciliation"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]] },
+  ];
+  const navBtn = ([k,l])=>`<button class="btn ${booksView===k?'gold':'ghost'} sm booksNavBtn" data-view="${k}">${l}</button>`;
+  const nav = `<div class="row" style="margin-bottom:14px;align-items:center;">${navGroups.map(g=>
+    (g.label?`<span class="helptext" style="margin:0 2px 0 6px;">${g.label}:</span>`:'') + g.views.map(navBtn).join("")
+  ).join("")}</div>`;
 
   let body;
   if(booksView==="items") body = renderStockItems();
@@ -2942,16 +2953,7 @@ function renderVouchersView(){
     <p class="helptext" style="margin-bottom:14px;">${escapeHtml(VOUCHER_TYPE_HELP[voucherType]||'')}</p>`}
     ${form}
   </div>
-  <div class="card">
-    <h2>Import Vouchers from CSV</h2>
-    <div class="sub">For bulk-adding Payment/Receipt transactions (e.g. from a bank statement or spreadsheet). Each row needs an Account name that already exists in your Chart of Accounts - the other side always posts to Bank Account.</div>
-    <div class="row">
-      <button class="btn ghost" id="downloadVoucherCsvTemplateBtn">Download CSV Template</button>
-      <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importVoucherCsvInput" accept=".csv" style="display:none;"></label>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Day Book</h2>
+  <details class="collapse-card" id="dayBookDetails" ${booksDayBookOpen?'open':''}><summary>Day Book<span class="sub">Every voucher in a date range - all vouchers you've entered recently.</span></summary><div class="collapse-body">
     <div class="row">
       <div class="field" style="max-width:160px;"><label>From</label><input type="date" id="db_from" value="${booksDayRange.from}"></div>
       <div class="field" style="max-width:160px;"><label>To</label><input type="date" id="db_to" value="${booksDayRange.to}"></div>
@@ -2964,7 +2966,14 @@ function renderVouchersView(){
         <tbody>${dayRows || `<tr><td colspan="7" class="empty">No vouchers in this range.</td></tr>`}</tbody>
       </table>
     </div>
-  </div>`;
+  </div></details>
+  <details class="collapse-card" id="csvImportDetails" ${booksCsvImportOpen?'open':''}><summary>Import Vouchers from CSV<span class="sub">Bulk-add Payment/Receipt transactions from a bank statement or spreadsheet.</span></summary><div class="collapse-body">
+    <div class="sub">Each row needs an Account name that already exists in your Chart of Accounts - the other side always posts to Bank Account.</div>
+    <div class="row">
+      <button class="btn ghost" id="downloadVoucherCsvTemplateBtn">Download CSV Template</button>
+      <label class="btn ghost" style="cursor:pointer;">Import CSV<input type="file" id="importVoucherCsvInput" accept=".csv" style="display:none;"></label>
+    </div>
+  </div></details>`;
 }
 
 // Minimal CSV importer for Payment/Receipt vouchers - Account must match an
@@ -5359,6 +5368,12 @@ function attachHandlers(){
       document.getElementById("cancelEmpBtn").style.display = "inline-block";
       window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"});
     });
+    const salaryDetailsCard = document.getElementById("salaryDetailsCard");
+    if(salaryDetailsCard) salaryDetailsCard.ontoggle = ()=>{ empSalaryDetailsOpen = salaryDetailsCard.open; };
+    const onboardDetailsCard = document.getElementById("onboardDetailsCard");
+    if(onboardDetailsCard) onboardDetailsCard.ontoggle = ()=>{ empOnboardDetailsOpen = onboardDetailsCard.open; };
+    const letterDetailsCard = document.getElementById("letterDetailsCard");
+    if(letterDetailsCard) letterDetailsCard.ontoggle = ()=>{ empLetterDetailsOpen = letterDetailsCard.open; };
     document.querySelectorAll(".form-tab-btn").forEach(b=>b.onclick=()=>{
       document.querySelectorAll(".form-tab-btn").forEach(x=>x.classList.remove("active"));
       b.classList.add("active");
@@ -6077,8 +6092,12 @@ function attachHandlers(){
       });
       const cancelVoucherEditBtn = document.getElementById("cancelVoucherEditBtn");
       if(cancelVoucherEditBtn) cancelVoucherEditBtn.onclick = ()=>{ resetVoucherFormState(); renderAll(); };
+      const dayBookDetails = document.getElementById("dayBookDetails");
+      if(dayBookDetails) dayBookDetails.ontoggle = ()=>{ booksDayBookOpen = dayBookDetails.open; };
+      const csvImportDetails = document.getElementById("csvImportDetails");
+      if(csvImportDetails) csvImportDetails.ontoggle = ()=>{ booksCsvImportOpen = csvImportDetails.open; };
       document.getElementById("loadDayBookBtn").onclick = ()=>{
-        booksDayRange = {from: val("db_from"), to: val("db_to")}; renderAll();
+        booksDayRange = {from: val("db_from"), to: val("db_to")}; booksDayBookOpen = true; renderAll();
       };
       document.getElementById("exportDayBookBtn").onclick = ()=>{
         const rows = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
