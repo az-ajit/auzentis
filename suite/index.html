@@ -2160,6 +2160,12 @@ async function createLeadWonVoucher(lead){
 
 async function deleteVoucher(voucherId){
   try{
+    // Snapshot before anything's deleted, so the audit log keeps a record
+    // of what the voucher actually contained.
+    const v = DB.vouchers.find(x=>x.id===voucherId);
+    const snapshotLines = DB.voucherLines.filter(l=>l.voucherId===voucherId).map(l=>({account:accName(l.accountId), debit:l.debit||0, credit:l.credit||0}));
+    const snapshotItems = DB.voucherItems.filter(i=>i.voucherId===voucherId).map(i=>({item:i.description, qty:i.qty, rate:i.rate, amount:i.amount}));
+
     const { error: lErr } = await sb.from("voucher_lines").delete().eq("voucher_id", voucherId);
     if(lErr){ toast("Could not delete: " + lErr.message, true); return; }
     const { error: vErr } = await sb.from("vouchers").delete().eq("id", voucherId);
@@ -2174,6 +2180,10 @@ async function deleteVoucher(voucherId){
     DB.voucherItems = DB.voucherItems.filter(i=>i.voucherId!==voucherId);
     DB.voucherLines = DB.voucherLines.filter(l=>l.voucherId!==voucherId);
     DB.vouchers = DB.vouchers.filter(v=>v.id!==voucherId);
+    if(v) await logAudit("delete", "vouchers", voucherId, {
+      voucherType:v.voucherType, voucherNo:v.voucherNo, date:v.date, party: v.partyId?accName(v.partyId):null,
+      narration:v.narration||null, lines:snapshotLines, items:snapshotItems.length?snapshotItems:undefined
+    });
     toast("Voucher deleted.");
   }catch(e){ console.error(e); toast("Could not delete: " + e.message, true); }
 }
@@ -5644,6 +5654,12 @@ function attachHandlers(){
           }
         }
         if(ok){
+          const auditLines = (nonAccounting ? [] : lines).map(l=>({account:accName(l.accountId), debit:l.debit||0, credit:l.credit||0}));
+          const auditItems = (items||[]).map(it=>({item:it.description, qty:it.qty, rate:it.rate, amount:it.amount}));
+          await logAudit(editingVoucher ? "update" : "create", "vouchers", voucher.id, {
+            voucherType:kind, voucherNo:vNo, date:voucher.date, party: voucher.partyId?accName(voucher.partyId):null,
+            narration:voucher.narration||null, lines:auditLines, items:auditItems.length?auditItems:undefined
+          });
           toast(voucherTypeLabel(kind) + (editingVoucher ? " updated." : " saved."));
           resetVoucherFormState();
           renderAll();
