@@ -3973,15 +3973,24 @@ function renderMyProfile(){
     return `<div class="card"><div class="empty">Your login isn't linked to an employee record yet. Ask your Admin to link you in the Team tab.</div></div>`;
   }
   const d = emp.details || {};
+  const maskedField = (id, value) => `
+      <div class="field">
+        <label>${id==='mp_pan'?'PAN':id==='mp_aadhar'?'Aadhar':'A/c No.'}</label>
+        <div style="display:flex;gap:6px;">
+          <input id="${id}" value="${value?maskTail(value):''}" ${value?'readonly':''} style="flex:1;">
+          ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
+        </div>
+      </div>`;
   return `
   <div class="card">
     <h2>My Profile</h2>
     <div class="sub">Keep your own details up to date - HR uses this for payroll and records. Changes save straight to your employee record. Set your Date of Birth so we can wish you on your birthday!</div>
+    <p class="helptext">For your security, PAN, Aadhar and Bank A/c No. are masked once saved. Click "Change" next to a field to clear and re-enter it.</p>
     <div class="section-title">Personal Details</div>
     <div class="grid grid-4">
       <div class="field"><label>Date of Birth</label><input type="date" id="mp_dob" value="${emp.dob||''}"></div>
-      <div class="field"><label>PAN</label><input id="mp_pan" value="${escapeHtml(d.pan||'')}"></div>
-      <div class="field"><label>Aadhar</label><input id="mp_aadhar" value="${escapeHtml(d.aadhar||'')}"></div>
+      ${maskedField('mp_pan', d.pan)}
+      ${maskedField('mp_aadhar', d.aadhar)}
       <div class="field" style="grid-column:span 2;"><label>Address</label><input id="mp_address" value="${escapeHtml(d.address||'')}"></div>
       <div class="field"><label>Emergency Contact Name</label><input id="mp_emergencyName" value="${escapeHtml(d.emergencyContactName||'')}"></div>
       <div class="field"><label>Emergency Contact Phone</label><input id="mp_emergencyPhone" value="${escapeHtml(d.emergencyContactPhone||'')}"></div>
@@ -3989,7 +3998,7 @@ function renderMyProfile(){
     <div class="section-title">Bank Details (for salary payment)</div>
     <div class="grid grid-4">
       <div class="field"><label>A/c Holder's Name</label><input id="mp_bankHolder" value="${escapeHtml(d.bankAccountName||'')}"></div>
-      <div class="field"><label>A/c No.</label><input id="mp_bankAccNo" value="${escapeHtml(d.bankAccountNo||'')}"></div>
+      ${maskedField('mp_bankAccNo', d.bankAccountNo)}
       <div class="field"><label>IFSC</label><input id="mp_ifsc" value="${escapeHtml(d.ifsc||'')}"></div>
       <div class="field"><label>Bank Name</label><input id="mp_bankName" value="${escapeHtml(d.bankName||'')}"></div>
     </div>
@@ -6306,23 +6315,36 @@ function attachHandlers(){
   }
 
   if(activeTab==="My Profile"){
+    document.querySelectorAll(".mpUnlockBtn").forEach(b=>b.onclick=()=>{
+      const input = document.getElementById(b.dataset.target);
+      input.readOnly = false; input.value = ""; input.focus();
+      b.remove();
+    });
     const saveMyProfileBtn = document.getElementById("saveMyProfileBtn");
     if(saveMyProfileBtn) saveMyProfileBtn.onclick = async ()=>{
       saveMyProfileBtn.disabled = true; saveMyProfileBtn.textContent = "Saving...";
       try{
         const dob = val("mp_dob");
+        const emp = DB.employees.find(e=>e.id===currentEmpId);
+        const existingDetails = emp ? (emp.details||{}) : {};
+        const panEl = document.getElementById("mp_pan"), aadharEl = document.getElementById("mp_aadhar"), bankAccEl = document.getElementById("mp_bankAccNo");
         const patch = {
-          pan: val("mp_pan").trim(), aadhar: val("mp_aadhar").trim(), address: val("mp_address").trim(),
+          // Masked+locked fields (still showing their saved value, untouched) send the real
+          // saved value back unchanged, not the masked placeholder that's on screen.
+          pan: panEl.readOnly ? (existingDetails.pan||"") : val("mp_pan").trim(),
+          aadhar: aadharEl.readOnly ? (existingDetails.aadhar||"") : val("mp_aadhar").trim(),
+          address: val("mp_address").trim(),
           emergencyContactName: val("mp_emergencyName").trim(), emergencyContactPhone: val("mp_emergencyPhone").trim(),
-          bankAccountName: val("mp_bankHolder").trim(), bankAccountNo: val("mp_bankAccNo").trim(),
+          bankAccountName: val("mp_bankHolder").trim(),
+          bankAccountNo: bankAccEl.readOnly ? (existingDetails.bankAccountNo||"") : val("mp_bankAccNo").trim(),
           ifsc: val("mp_ifsc").trim(), bankName: val("mp_bankName").trim(),
         };
         const { data, error } = await sb.functions.invoke("update-my-details", { body: {...patch, dob} });
         if(error){ toast("Could not save: " + (await extractFnError(error)), true); return; }
         if(data && data.error){ toast(data.error, true); return; }
-        const emp = DB.employees.find(e=>e.id===currentEmpId);
         if(emp){ emp.details = {...(emp.details||{}), ...patch}; if(dob) emp.dob = dob; }
         toast("Profile saved.");
+        renderAll();
       }catch(err){
         console.error(err);
         toast("Could not save: " + err.message, true);
