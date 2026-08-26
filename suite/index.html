@@ -1466,6 +1466,7 @@ function renderEmployees(){
       <td><input type="checkbox" class="rowCheck empCheck" data-id="${e.id}" ${selectedEmployeeIds.has(e.id)?'checked':''}></td>
       <td>${e.id}</td>
       <td>${e.name}</td>
+      <td class="hide-tablet">${(e.details&&e.details.designation)||'-'}</td>
       <td>${e.doj}</td>
       <td class="hide-tablet">${e.dob||'-'}</td>
       <td>${e.email||'-'}</td>
@@ -1502,7 +1503,7 @@ function renderEmployees(){
     ${selectedEmployeeIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedEmployeeIds.size} selected</span><button class="btn danger sm" id="bulkDeleteEmpBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th>DOJ</th><th class="hide-tablet">DOB</th><th>Email</th><th class="hide-tablet">Resigned</th><th>Status</th><th class="hide-tablet">Basic</th><th class="hide-tablet">HRA</th><th class="hide-tablet">Other</th><th>Gross</th><th></th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th class="hide-tablet">Designation</th><th>DOJ</th><th class="hide-tablet">DOB</th><th>Email</th><th class="hide-tablet">Resigned</th><th>Status</th><th class="hide-tablet">Basic</th><th class="hide-tablet">HRA</th><th class="hide-tablet">Other</th><th>Gross</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="13" class="empty">No employees match.</td></tr>`}</tbody>
       </table>
     </div>
@@ -1514,6 +1515,8 @@ function renderEmployees(){
     <div class="grid grid-4">
       <div class="field"><label>Emp ID</label><input id="f_id" placeholder="${nextEmpId()}" value="${nextEmpId()}"></div>
       <div class="field"><label>Name</label><input id="f_name" placeholder="Full name"></div>
+      <div class="field"><label>Designation</label><input id="f_designation" placeholder="e.g. Executive"></div>
+      <div class="field"><label>Department</label><input id="f_department" placeholder="e.g. Operations"></div>
       <div class="field"><label>Date of Joining</label><input type="date" id="f_doj"></div>
       <div class="field"><label>Date of Birth</label><input type="date" id="f_dob"></div>
       <div class="field"><label>Email</label><input type="email" id="f_email" placeholder="employee@auzentis.com"></div>
@@ -1752,7 +1755,7 @@ let letterStartDate = null;
 
 function letterBodyText(type, emp, ctc){
   const company = "Auzentis Private Limited";
-  const designation = letterDesignation || "the offered position";
+  const designation = letterDesignation || "your position";
   const startDate = letterStartDate || emp.doj;
   if(type==="Offer"){
     return `Dear ${emp.name},<br><br>
@@ -1773,13 +1776,13 @@ function letterBodyText(type, emp, ctc){
       <b>Annual CTC:</b> ₹${fmt0(ctc)}<br><br>
       Your employment will be governed by the Company's policies as communicated to you from time to time. We are delighted to have you as part of the ${company} team and look forward to a mutually rewarding association.`;
   }
+  // Relieving Letter - states the employment period once (no repeated Position/DOJ/Last-Working-Date
+  // block after the opening line), matching standard corporate relieving-letter format.
   const lastWorkingDate = letterStartDate || emp.resignDate || emp.doj;
   return `Dear ${emp.name},<br><br>
-    This is to confirm that you were employed with ${company} as <b>${escapeHtml(designation)}</b> from <b>${emp.doj}</b> to <b>${lastWorkingDate}</b>.<br><br>
-    <b>Position:</b> ${escapeHtml(designation)}<br>
-    <b>Date of Joining:</b> ${emp.doj}<br>
-    <b>Last Working Date:</b> ${lastWorkingDate}<br><br>
-    During your tenure with us, we found you sincere and hardworking. All dues, if any, payable to/by you have been settled. We wish you the very best in your future endeavors.`;
+    This is to confirm that ${emp.name}, who was employed with ${company} as <b>${escapeHtml(designation)}</b> from <b>${emp.doj}</b> to <b>${lastWorkingDate}</b>, has been relieved from services with effect from <b>${lastWorkingDate}</b>, consequent to the acceptance of their resignation.<br><br>
+    We place on record our appreciation for the contribution made during the tenure of employment. All dues, if any, payable to or by the employee stand settled as per Company records.<br><br>
+    We wish ${emp.name} the very best in all future endeavors.`;
 }
 
 async function buildLetterPdf(){
@@ -1798,9 +1801,11 @@ async function buildLetterPdf(){
 
 function renderOfferLetterCard(){
   if(!DB.employees.length) return "";
-  if(!letterEmpId || !DB.employees.some(e=>e.id===letterEmpId)) letterEmpId = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id))[0].id;
-  if(!letterStartDate) letterStartDate = new Date().toISOString().slice(0,10);
+  let freshPick = false;
+  if(!letterEmpId || !DB.employees.some(e=>e.id===letterEmpId)){ letterEmpId = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id))[0].id; freshPick = true; }
   const emp = DB.employees.find(e=>e.id===letterEmpId);
+  if(freshPick) letterDesignation = (emp.details && emp.details.designation) || "";
+  if(!letterStartDate) letterStartDate = (letterType==="Relieving" && emp.resignDate) ? emp.resignDate : new Date().toISOString().slice(0,10);
   const struct = currentStructureFor(emp.id);
   const monthlyCtc = struct ? (struct.basic+struct.hra+(struct.components||[]).reduce((a,c)=>a+c.amount,0)) : (emp.basic+emp.hra+emp.other);
   const annualCtc = round2(monthlyCtc*12);
@@ -4613,7 +4618,7 @@ function dateInRange(dateStr, from, to){
 
 const REPORT_DEFS = {
   employees: {
-    label: "Employees", headers: ["Emp ID","Name","DOJ","DOB","Email","Resigned","Status","Basic","HRA","Other Allowance","Gross","PAN","Aadhar","Address","Emergency Contact Name","Emergency Contact Phone","Bank Account Name","Bank Account No","IFSC","Bank Name","Onboarding Progress"],
+    label: "Employees", headers: ["Emp ID","Name","Designation","Department","DOJ","DOB","Email","Resigned","Status","Basic","HRA","Other Allowance","Gross","PAN","Aadhar","Address","Emergency Contact Name","Emergency Contact Phone","Bank Account Name","Bank Account No","IFSC","Bank Name","Onboarding Progress"],
     dateNote: "Filtered by Date of Joining.",
     rows(from,to){
       return DB.employees.filter(e=>dateInRange(e.doj, from, to))
@@ -4624,7 +4629,7 @@ const REPORT_DEFS = {
           const d = e.details||{};
           const ob = onboardingProgress(e);
           const canSee = canSeeSensitiveEmpData();
-          return [e.id,e.name,e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,basic,hra,other,basic+hra+other,
+          return [e.id,e.name,d.designation||'',d.department||'',e.doj,e.dob||'',e.email||'',e.resignDate||'',e.status,basic,hra,other,basic+hra+other,
             canSee?(d.pan||''):maskTail(d.pan),canSee?(d.aadhar||''):maskTail(d.aadhar),d.address||'',d.emergencyContactName||'',d.emergencyContactPhone||'',
             d.bankAccountName||'',canSee?(d.bankAccountNo||''):maskTail(d.bankAccountNo),d.ifsc||'',d.bankName||'',`${ob.done}/${ob.total}`];
         });
@@ -5193,6 +5198,8 @@ function attachHandlers(){
       document.getElementById("salaryFieldsGroup").style.display = "none";
       document.getElementById("salaryFieldsNote").style.display = "block";
       const d = emp.details || {};
+      document.getElementById("f_designation").value = d.designation||"";
+      document.getElementById("f_department").value = d.department||"";
       const canSee = canSeeSensitiveEmpData();
       const panEl = document.getElementById("f_pan"), aadharEl = document.getElementById("f_aadhar"), bankAccEl = document.getElementById("f_bankAccNo");
       panEl.value = canSee ? (d.pan||"") : maskTail(d.pan); panEl.readOnly = !canSee && !!d.pan;
@@ -5249,6 +5256,7 @@ function attachHandlers(){
       const panEl = document.getElementById("f_pan"), aadharEl = document.getElementById("f_aadhar"), bankAccEl = document.getElementById("f_bankAccNo");
       const details = {
         ...existingDetails, // preserves onboarding checklist - this form never touches it
+        designation: val("f_designation").trim(), department: val("f_department").trim(),
         pan: panEl.readOnly ? (existingDetails.pan||"") : val("f_pan").trim(),
         aadhar: aadharEl.readOnly ? (existingDetails.aadhar||"") : val("f_aadhar").trim(),
         address: val("f_address").trim(),
@@ -5444,9 +5452,20 @@ function attachHandlers(){
     };
 
     const letterEmpSelect = document.getElementById("letterEmpSelect");
-    if(letterEmpSelect) letterEmpSelect.onchange = (e)=>{ letterEmpId = e.target.value; renderAll(); };
+    if(letterEmpSelect) letterEmpSelect.onchange = (e)=>{
+      letterEmpId = e.target.value;
+      const emp = DB.employees.find(x=>x.id===letterEmpId);
+      letterDesignation = (emp && emp.details && emp.details.designation) || "";
+      letterStartDate = (letterType==="Relieving" && emp && emp.resignDate) ? emp.resignDate : new Date().toISOString().slice(0,10);
+      renderAll();
+    };
     const letterTypeSelect = document.getElementById("letterTypeSelect");
-    if(letterTypeSelect) letterTypeSelect.onchange = (e)=>{ letterType = e.target.value; renderAll(); };
+    if(letterTypeSelect) letterTypeSelect.onchange = (e)=>{
+      letterType = e.target.value;
+      const emp = DB.employees.find(x=>x.id===letterEmpId);
+      if(letterType==="Relieving" && emp && emp.resignDate) letterStartDate = emp.resignDate;
+      renderAll();
+    };
     const letterDesignationInput = document.getElementById("letterDesignationInput");
     if(letterDesignationInput) letterDesignationInput.oninput = ()=>{ letterDesignation = letterDesignationInput.value; };
     const letterManagerInput = document.getElementById("letterManagerInput");
