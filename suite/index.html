@@ -2763,7 +2763,9 @@ function renderBooks(){
 // ---- Stock Items (item master for item-wise invoicing - no stock-on-hand/valuation tracking) ----
 let itemEditingId = null;
 function renderStockItems(){
-  const rows = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>{
+  const sorted = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const { pageItems, page, totalPages, total } = paginate(sorted, "stockItems", 20);
+  const rows = pageItems.map(i=>{
     const stk = itemStockPosition(i.id);
     return `
     <tr data-id="${i.id}">
@@ -2786,6 +2788,7 @@ function renderStockItems(){
         <tbody>${rows || `<tr><td colspan="7" class="empty">No items yet.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("stockItems", page, totalPages, total)}
     <div class="section-title">${editing ? `Edit Item - ${escapeHtml(editing.name)}` : `Add Item <span class="hotkey-tag">Alt+C</span>`}</div>
     <input type="hidden" id="itemEditingId" value="${itemEditingId||''}">
     <div class="grid grid-4">
@@ -2809,7 +2812,9 @@ function renderStockItems(){
 let accEditingId = null;
 let openingBillsDraft = []; // [{id,date,reference,amount}] - draft for the Opening Bills section, synced from the account being edited by editAccBtn
 function renderChartOfAccounts(){
-  const rows = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name)).map(a=>`
+  const sorted = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name));
+  const { pageItems, page, totalPages, total } = paginate(sorted, "chartOfAccounts", 20);
+  const rows = pageItems.map(a=>`
     <tr data-id="${a.id}">
       <td>${a.name}</td><td>${a.accGroup}</td><td>${a.nature}</td>
       <td>${a.isParty ? (a.partyType||'Party') : ''}</td>
@@ -2830,9 +2835,10 @@ function renderChartOfAccounts(){
     <div class="tablewrap">
       <table>
         <thead><tr><th>Name</th><th>Group</th><th>Nature</th><th>Party Type</th><th>Current Balance</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No accounts yet.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("chartOfAccounts", page, totalPages, total)}
     <div class="section-title">${editing ? `Edit Account - ${escapeHtml(editing.name)}` : `Add Account <span class="hotkey-tag">Alt+C</span>`}</div>
     <input type="hidden" id="accEditingId" value="${accEditingId||''}">
     <div class="grid grid-4">
@@ -2919,8 +2925,10 @@ function renderVouchersView(){
   else if(NON_ACCOUNTING_VOUCHER_TYPES.includes(voucherType)) form = voucherFormOrderNote(voucherType);
   else form = voucherFormJournal();
 
-  const dayRows = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
-    .sort((a,b)=>b.date.localeCompare(a.date)).map(v=>{
+  const dayBookVouchers = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
+    .sort((a,b)=>b.date.localeCompare(a.date));
+  const { pageItems: dayBookPage, page: dayBookPageNum, totalPages: dayBookTotalPages, total: dayBookTotal } = paginate(dayBookVouchers, "dayBook", 25);
+  const dayRows = dayBookPage.map(v=>{
       const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
       const items = DB.voucherItems.filter(i=>i.voucherId===v.id);
       const isNonAcct = NON_ACCOUNTING_VOUCHER_TYPES.includes(v.voucherType);
@@ -2965,6 +2973,7 @@ function renderVouchersView(){
         <tbody>${dayRows || `<tr><td colspan="7" class="empty">No vouchers in this range.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("dayBook", dayBookPageNum, dayBookTotalPages, dayBookTotal)}
   </div></details>
   <details class="collapse-card" id="csvImportDetails" ${booksCsvImportOpen?'open':''}><summary>Import Vouchers from CSV<span class="sub">Bulk-add Payment/Receipt transactions from a bank statement or spreadsheet.</span></summary><div class="collapse-body">
     <div class="sub">Each row needs an Account name that already exists in your Chart of Accounts - the other side always posts to Bank Account.</div>
@@ -3394,16 +3403,21 @@ function renderPartyLedgers(){
   if(booksPartyId){
     const postings = getAllPostings().filter(p=>p.accountId===booksPartyId);
     let running = 0;
-    const rows = postings.map(p=>{
+    const postingsWithBalance = postings.map(p=>{
       running += (p.debit||0)-(p.credit||0);
+      return {...p, runningBalance: running};
+    });
+    const { pageItems: ledgerPage, page: ledgerPageNum, totalPages: ledgerTotalPages, total: ledgerTotal } = paginate(postingsWithBalance, "partyLedgerDetail", 25);
+    const rows = ledgerPage.map(p=>{
       const allocs = p.voucherId ? billAllocationsForVoucher(p.voucherId) : [];
       const isSettlingType = ["Payment","Receipt","CreditNote","DebitNote"].includes(p.voucherType);
       const agstRef = allocs.length ? allocs.map(a=>`Agst ${a.billVoucherNo}: ${fmt0(a.amount)}`).join(", ") : (isSettlingType ? "On Account" : "");
-      return `<tr><td>${p.date}</td><td>${p.voucherNo}</td><td>${p.particulars}</td><td>${agstRef}</td><td class="num">${p.debit?fmt(p.debit):''}</td><td class="num">${p.credit?fmt(p.credit):''}</td><td class="num">${fmt(running)}</td></tr>`;
+      return `<tr><td>${p.date}</td><td>${p.voucherNo}</td><td>${p.particulars}</td><td>${agstRef}</td><td class="num">${p.debit?fmt(p.debit):''}</td><td class="num">${p.credit?fmt(p.credit):''}</td><td class="num">${fmt(p.runningBalance)}</td></tr>`;
     }).join("");
     detail = `<div class="card"><h2>Ledger - ${accName(booksPartyId)}</h2>
       <div class="tablewrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th>Agst Ref</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions yet.</td></tr>`}</tbody></table></div></div>`;
+      <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions yet.</td></tr>`}</tbody></table></div>
+      ${renderPager("partyLedgerDetail", ledgerPageNum, ledgerTotalPages, ledgerTotal)}</div>`;
 
     const openBills = openBillsForParty(booksPartyId);
     const billRows = openBills.map(b=>`<tr><td>${b.voucher.date}</td><td>${b.voucher.voucherType} ${b.voucher.voucherNo}</td>
@@ -3414,18 +3428,23 @@ function renderPartyLedgers(){
       <tbody>${billRows || `<tr><td colspan="5" class="empty">No open bills.</td></tr>`}</tbody></table></div></div>`;
   }
 
+  const { pageItems: debtorsPage, page: debtorsPageNum, totalPages: debtorsTotalPages, total: debtorsTotal } = paginate(debtors, "partyDebtors", 20);
+  const { pageItems: creditorsPage, page: creditorsPageNum, totalPages: creditorsTotalPages, total: creditorsTotal } = paginate(creditors, "partyCreditors", 20);
+
   return `
   <div class="card">
     <h2>Sundry Debtors (Customers who owe you)</h2>
     <div class="sub">Every account marked as a Debtor in Chart of Accounts. Balance is what they currently owe; the four columns split that by how long it's been outstanding (aging), so you can spot overdue customers at a glance.</div>
     <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${debtors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet - add one in Chart of Accounts and mark it as a Debtor.</td></tr>`}</tbody></table></div>
+    <tbody>${debtorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet - add one in Chart of Accounts and mark it as a Debtor.</td></tr>`}</tbody></table></div>
+    ${renderPager("partyDebtors", debtorsPageNum, debtorsTotalPages, debtorsTotal)}
   </div>
   <div class="card">
     <h2>Sundry Creditors (Vendors you owe)</h2>
     <div class="sub">Every account marked as a Creditor in Chart of Accounts, with the same aging breakdown for what you owe them.</div>
     <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${creditors.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet - add one in Chart of Accounts and mark it as a Creditor.</td></tr>`}</tbody></table></div>
+    <tbody>${creditorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet - add one in Chart of Accounts and mark it as a Creditor.</td></tr>`}</tbody></table></div>
+    ${renderPager("partyCreditors", creditorsPageNum, creditorsTotalPages, creditorsTotal)}
   </div>
   <div class="card">
     <h2>View a Party's Full Ledger</h2>
@@ -3568,7 +3587,8 @@ function renderBankReconciliation(){
   const difference = round2(reconcileStatementBalance - reconciledBalance);
   const unclearedTotal = round2(rowsData.filter(x=>!x.line.bankReconciled).reduce((s,x)=>s + sign*((x.line.debit||0)-(x.line.credit||0)), 0));
 
-  const rows = rowsData.map(({line,voucher})=>`
+  const { pageItems: reconcilePage, page: reconcilePageNum, totalPages: reconcileTotalPages, total: reconcileTotal } = paginate(rowsData, "bankReconcile", 25);
+  const rows = reconcilePage.map(({line,voucher})=>`
     <tr>
       <td>${voucher.date}</td><td>${voucherTypeLabel(voucher.voucherType)} ${voucher.voucherNo}</td>
       <td>${voucher.narration||line.lineNarration||''}</td>
@@ -3601,6 +3621,7 @@ function renderBankReconciliation(){
         <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions for this account.</td></tr>`}</tbody>
       </table>
     </div>
+    ${renderPager("bankReconcile", reconcilePageNum, reconcileTotalPages, reconcileTotal)}
   </div>`;
 }
 
