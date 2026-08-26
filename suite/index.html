@@ -1760,7 +1760,8 @@ const SYS_ACCOUNTS = {
   gstPayable:"sys-gst-payable", gstInput:"sys-gst-input", // legacy flat-GST vouchers only — kept so old data still reads correctly
   cgstPayable:"sys-cgst-payable", sgstPayable:"sys-sgst-payable", igstPayable:"sys-igst-payable",
   cgstInput:"sys-cgst-input", sgstInput:"sys-sgst-input", igstInput:"sys-igst-input",
-  salesReturn:"sys-sales-return", purchaseReturn:"sys-purchase-return",
+  salesReturn:"sys-sales-return", purchaseReturn:"sys-purchase-return", roundOff:"sys-round-off",
+  tdsPayableVendor:"sys-tds-payable-vendor", // TDS withheld on vendor Payments — separate from tdsPayable (payroll TDS) to keep the two apart in reports
   salaryExpense:"sys-salary-expense", pfErExpense:"sys-pf-er-expense", esiErExpense:"sys-esi-er-expense",
   pfPayable:"sys-pf-payable", esiPayable:"sys-esi-payable", ptPayable:"sys-pt-payable",
   tdsPayable:"sys-tds-payable", salaryPayable:"sys-salary-payable", capital:"sys-capital"
@@ -1780,6 +1781,8 @@ const SEED_CHART_OF_ACCOUNTS = [
   {id:SYS_ACCOUNTS.igstInput, name:"IGST Input Credit", acc_group:"Duties & Taxes", nature:"Asset", is_system:true},
   {id:SYS_ACCOUNTS.salesReturn, name:"Sales Return", acc_group:"Sales Accounts", nature:"Income", is_system:true},
   {id:SYS_ACCOUNTS.purchaseReturn, name:"Purchase Return", acc_group:"Purchase Accounts", nature:"Expense", is_system:true},
+  {id:SYS_ACCOUNTS.roundOff, name:"Round Off", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
+  {id:SYS_ACCOUNTS.tdsPayableVendor, name:"TDS Payable (Vendors)", acc_group:"Duties & Taxes", nature:"Liability", is_system:true},
   {id:SYS_ACCOUNTS.salaryExpense, name:"Salary Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
   {id:SYS_ACCOUNTS.pfErExpense, name:"PF Employer Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
   {id:SYS_ACCOUNTS.esiErExpense, name:"ESI Employer Expense", acc_group:"Indirect Expenses", nature:"Expense", is_system:true},
@@ -1828,6 +1831,19 @@ const VOUCHER_TYPE_HELP = {
 
 function normalSign(nature){ return (nature==="Asset"||nature==="Expense") ? 1 : -1; }
 function accName(id){ const a = DB.ledgerAccounts.find(x=>x.id===id); return a ? a.name : id; }
+
+// A manual Round Off adjustment (e.g. rounding an invoice's grand total to
+// the nearest rupee) changes the party's line by `delta` without touching
+// the Sales/Purchase/tax lines — this returns the single extra Dr or Cr
+// line on the Round Off account needed to keep the voucher balanced.
+// partyOnDrSide: true for Sales/Debit Note (party is Dr), false for
+// Purchase/Credit Note (party is Cr).
+function roundOffLine(delta, partyOnDrSide){
+  delta = round2(delta);
+  if(Math.abs(delta) < 0.005) return null;
+  if(partyOnDrSide) return delta>0 ? {accountId:SYS_ACCOUNTS.roundOff, debit:0, credit:delta} : {accountId:SYS_ACCOUNTS.roundOff, debit:-delta, credit:0};
+  return delta>0 ? {accountId:SYS_ACCOUNTS.roundOff, debit:delta, credit:0} : {accountId:SYS_ACCOUNTS.roundOff, debit:0, credit:-delta};
+}
 const VOUCHER_TYPE_LABELS = {CreditNote:"Credit Note", DebitNote:"Debit Note", SalesOrder:"Sales Order", PurchaseOrder:"Purchase Order", DeliveryNote:"Delivery Note", ReceiptNote:"Receipt Note"};
 function voucherTypeLabel(t){ return VOUCHER_TYPE_LABELS[t] || t; }
 
@@ -2003,6 +2019,114 @@ async function saveNonAccountingVoucher(voucher, items){
   }catch(e){ console.error(e); toast("Could not save: " + e.message, true); return false; }
 }
 
+// Editing an existing voucher: keeps the same id and voucher number, only
+// updates date/party/narration/reference on the voucher itself, then wipes
+// and rewrites its lines/items/bill-allocations wholesale (simplest correct
+// approach — a voucher's children are always small in number). lines may be
+// empty/omitted for non-accounting types (Sales/Purchase Order, Delivery/
+// Receipt Note), which never had lines to begin with.
+async function updateVoucherChildren(voucher, lines, items, billAllocs){
+  try{
+    if(lines && lines.length){
+      const cleanLines = lines.filter(l=>(l.debit||0)>0 || (l.credit||0)>0);
+      const totalDr = cleanLines.reduce((a,l)=>a+(l.debit||0),0);
+      const totalCr = cleanLines.reduce((a,l)=>a+(l.credit||0),0);
+      if(cleanLines.length < 2){ toast("A voucher needs at least two line entries.", true); return false; }
+      if(Math.abs(totalDr-totalCr) > 0.01){ toast(`Voucher does not balance — Dr ${fmt(totalDr)} vs Cr ${fmt(totalCr)}.`, true); return false; }
+      lines = cleanLines;
+    }
+
+    const { error: uErr } = await sb.from("vouchers").update({
+      date:voucher.date, party_id:voucher.partyId||null, narration:voucher.narration||null, reference:voucher.reference||null
+    }).eq("id", voucher.id);
+    if(uErr){ toast("Could not update voucher: " + uErr.message, true); return false; }
+
+    await sb.from("voucher_lines").delete().eq("voucher_id", voucher.id);
+    await sb.from("voucher_items").delete().eq("voucher_id", voucher.id);
+    await sb.from("bill_allocations").delete().eq("voucher_id", voucher.id);
+    DB.voucherLines = DB.voucherLines.filter(l=>l.voucherId!==voucher.id);
+    DB.voucherItems = DB.voucherItems.filter(i=>i.voucherId!==voucher.id);
+    DB.billAllocations = DB.billAllocations.filter(a=>a.voucherId!==voucher.id);
+
+    const vIdx = DB.vouchers.findIndex(v=>v.id===voucher.id);
+    if(vIdx>-1) DB.vouchers[vIdx] = {...DB.vouchers[vIdx], date:voucher.date, partyId:voucher.partyId, narration:voucher.narration, reference:voucher.reference};
+
+    if(lines && lines.length){
+      const lineRows = lines.map(l=>({id:newId("VL"), voucher_id:voucher.id, account_id:l.accountId, debit:l.debit||0, credit:l.credit||0, line_narration:l.lineNarration||null}));
+      const { error: lErr } = await sb.from("voucher_lines").insert(lineRows);
+      if(lErr){ toast("Could not save voucher lines: " + lErr.message, true); return false; }
+      lineRows.forEach(r=>DB.voucherLines.push({id:r.id, voucherId:r.voucher_id, accountId:r.account_id, debit:r.debit, credit:r.credit, lineNarration:r.line_narration}));
+    }
+    if(items && items.length){
+      const rows = items.map(it=>({id:newId("VI"), voucher_id:voucher.id, stock_item_id:it.stockItemId||null, description:it.description,
+        hsn_code:it.hsnCode||null, qty:it.qty, rate:it.rate, discount_pct:it.discountPct||0, amount:it.amount, gst_rate:it.gstRate||0, gst_amount:it.gstAmount||0}));
+      const { error: iErr } = await sb.from("voucher_items").insert(rows);
+      if(iErr){ toast("Could not save items: " + iErr.message, true); return false; }
+      items.forEach((it,i)=> DB.voucherItems.push({id:rows[i].id, voucherId:voucher.id, ...it}));
+    }
+    if(billAllocs && billAllocs.length){
+      const rows = billAllocs.map(a=>({id:newId("BA"), voucher_id:voucher.id, bill_voucher_id:a.billVoucherId, amount:a.amount}));
+      const { error: bErr } = await sb.from("bill_allocations").insert(rows);
+      if(bErr){ toast("Could not save bill allocations: " + bErr.message, true); return false; }
+      rows.forEach(r=>DB.billAllocations.push({id:r.id, voucherId:r.voucher_id, billVoucherId:r.bill_voucher_id, amount:r.amount}));
+    }
+    return true;
+  }catch(e){ console.error(e); toast("Could not update voucher: " + e.message, true); return false; }
+}
+
+// Populates every piece of voucher-form state (party, items, ledger
+// account, cash/bank account, Contra from/to, Journal rows, bill
+// allocations, round off) by reverse-engineering it from the voucher's
+// already-saved lines/items — so the Edit form opens pre-filled exactly as
+// it was, regardless of voucher type. Save then calls updateVoucherChildren
+// instead of creating a new voucher.
+function startEditVoucher(id){
+  const v = DB.vouchers.find(x=>x.id===id);
+  if(!v) return;
+  const lines = DB.voucherLines.filter(l=>l.voucherId===id);
+  const items = DB.voucherItems.filter(i=>i.voucherId===id);
+  const allocs = DB.billAllocations.filter(a=>a.voucherId===id);
+
+  voucherEditingId = id;
+  voucherType = v.voucherType;
+  voucherRoundOff = 0;
+  paymentBillAllocDraft = {};
+  allocs.forEach(a=> paymentBillAllocDraft[a.billVoucherId] = a.amount);
+
+  const isItemWise = v.voucherType==="Sales" || v.voucherType==="Purchase" || v.voucherType==="CreditNote" || v.voucherType==="DebitNote" || NON_ACCOUNTING_VOUCHER_TYPES.includes(v.voucherType);
+  if(isItemWise){
+    voucherSalesPartyId = v.partyId;
+    voucherItemRows = items.length ? items.map(i=>({stockItemId:i.stockItemId||"", qty:i.qty, rate:i.rate, discountPct:i.discountPct||0})) : [{stockItemId:"", qty:1, rate:0, discountPct:0}];
+    if(lines.length){
+      const taxAcctIds = [SYS_ACCOUNTS.cgstPayable,SYS_ACCOUNTS.sgstPayable,SYS_ACCOUNTS.igstPayable,SYS_ACCOUNTS.cgstInput,SYS_ACCOUNTS.sgstInput,SYS_ACCOUNTS.igstInput,SYS_ACCOUNTS.gstPayable,SYS_ACCOUNTS.gstInput,SYS_ACCOUNTS.roundOff];
+      const ledgerLine = lines.find(l=>l.accountId!==v.partyId && !taxAcctIds.includes(l.accountId));
+      voucherLedgerAcctId = ledgerLine ? ledgerLine.accountId : null;
+      const roLine = lines.find(l=>l.accountId===SYS_ACCOUNTS.roundOff);
+      if(roLine) voucherRoundOff = roLine.debit>0 ? -roLine.debit : roLine.credit;
+    }
+  } else if(v.voucherType==="Payment" || v.voucherType==="Receipt"){
+    const cashIds = new Set(cashBankAccounts().map(a=>a.id));
+    const cashLine = lines.find(l=>cashIds.has(l.accountId));
+    const otherLine = lines.find(l=>!cashIds.has(l.accountId) && l.accountId!==SYS_ACCOUNTS.tdsPayableVendor);
+    const tdsLine = lines.find(l=>l.accountId===SYS_ACCOUNTS.tdsPayableVendor);
+    voucherCashBankId = cashLine ? cashLine.accountId : null;
+    if(otherLine){
+      const isParty = otherLine.accountId===v.partyId;
+      voucherPayRecTarget = (isParty?"party:":"acct:") + otherLine.accountId;
+      voucherAmountDraft = v.voucherType==="Payment" ? otherLine.debit : otherLine.credit;
+    }
+    voucherEditTds = tdsLine ? tdsLine.credit : 0;
+  } else if(v.voucherType==="Contra"){
+    const toLine = lines.find(l=>(l.debit||0)>0), fromLine = lines.find(l=>(l.credit||0)>0);
+    voucherContraTo = toLine ? toLine.accountId : null;
+    voucherContraFrom = fromLine ? fromLine.accountId : null;
+    voucherAmountDraft = toLine ? toLine.debit : 0;
+  } else if(v.voucherType==="Journal"){
+    journalRows = lines.map(l=>({account:l.accountId, debit:l.debit||0, credit:l.credit||0}));
+    if(journalRows.length<2) journalRows.push({account:"", debit:0, credit:0});
+  }
+}
+
 // CRM → Books: when a lead is marked Won, offer to post a matching Sales
 // voucher so closed deals flow into the ledger instead of needing a second
 // manual entry. Finds or creates a Sundry Debtor account for the lead's
@@ -2102,23 +2226,45 @@ function billOriginalAmount(voucherId, accountId){
 // Every Sales/Purchase bill for this party that still has an outstanding
 // balance after subtracting whatever's been explicitly allocated against it
 // via bill_allocations (excludeVoucherId lets a Payment/Receipt being edited
-// exclude its own prior allocations from the outstanding calc).
+// exclude its own prior allocations from the outstanding calc). Also
+// includes any "Opening Bills" entered on the account (Chart of Accounts →
+// Edit → Opening Bills) as synthetic bills with id "OPEN-<id>", so balances
+// carried forward from before you started using Books are still allocatable
+// bill-by-bill instead of being one untraceable lump sum.
 function openBillsForParty(partyId, excludeVoucherId){
   const billVouchers = DB.vouchers.filter(v=>v.partyId===partyId && (v.voucherType==="Sales" || v.voucherType==="Purchase"));
-  return billVouchers.map(v=>{
+  const realBills = billVouchers.map(v=>{
     const original = billOriginalAmount(v.id, partyId);
     const allocated = DB.billAllocations.filter(a=>a.billVoucherId===v.id && a.voucherId!==excludeVoucherId).reduce((s,a)=>s+a.amount,0);
     return { voucher:v, original, allocated, outstanding: round2(original - allocated) };
-  }).filter(b=>b.outstanding > 0.01).sort((a,b)=>a.voucher.date.localeCompare(b.voucher.date));
+  });
+  const party = DB.ledgerAccounts.find(a=>a.id===partyId);
+  const openingBills = (party && party.details && party.details.openingBills) || [];
+  const syntheticBills = openingBills.map(ob=>{
+    const syntheticId = "OPEN-"+ob.id;
+    const allocated = DB.billAllocations.filter(a=>a.billVoucherId===syntheticId && a.voucherId!==excludeVoucherId).reduce((s,a)=>s+a.amount,0);
+    return { voucher:{id:syntheticId, date:ob.date, voucherNo:"Opening Bal"+(ob.reference?" — "+ob.reference:""), voucherType:"Opening Balance"},
+      original:ob.amount, allocated, outstanding: round2(ob.amount - allocated) };
+  });
+  return [...realBills, ...syntheticBills].filter(b=>b.outstanding > 0.01).sort((a,b)=>a.voucher.date.localeCompare(b.voucher.date));
 }
 
 // Bill references a Payment/Receipt voucher was allocated against, for
 // display (e.g. "Agst BCA-0012") — empty if it was recorded as an advance/
-// on-account with no specific bill selected.
+// on-account with no specific bill selected. Handles both real vouchers and
+// synthetic "OPEN-<id>" opening bills.
 function billAllocationsForVoucher(voucherId){
   return DB.billAllocations.filter(a=>a.voucherId===voucherId).map(a=>{
     const bill = DB.vouchers.find(v=>v.id===a.billVoucherId);
-    return { ...a, billVoucherNo: bill ? bill.voucherNo : "(deleted bill)" };
+    if(bill) return { ...a, billVoucherNo: bill.voucherNo };
+    if(a.billVoucherId && a.billVoucherId.startsWith("OPEN-")){
+      const obId = a.billVoucherId.slice(5);
+      for(const acc of DB.ledgerAccounts){
+        const ob = ((acc.details && acc.details.openingBills) || []).find(o=>o.id===obId);
+        if(ob) return { ...a, billVoucherNo: "Opening Bal"+(ob.reference?" — "+ob.reference:"") };
+      }
+    }
+    return { ...a, billVoucherNo: "(deleted bill)" };
   });
 }
 
@@ -2238,6 +2384,7 @@ function renderStockItems(){
 
 // ---- Chart of Accounts ----
 let accEditingId = null;
+let openingBillsDraft = []; // [{id,date,reference,amount}] — draft for the Opening Bills section, synced from the account being edited by editAccBtn
 function renderChartOfAccounts(){
   const rows = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name)).map(a=>`
     <tr data-id="${a.id}">
@@ -2279,6 +2426,20 @@ function renderChartOfAccounts(){
         </select>
       </div>
       <div class="field"><label>Opening Balance (₹)</label><input type="number" id="acc_opening" value="${editing?editing.openingBalance:0}"></div>
+    </div>
+
+    <div class="section-title">Opening Bills (optional, for Debtor/Creditor accounts)</div>
+    <div class="sub">If this party had unpaid bills when you started using Books, list them here so they show up individually in Bill-wise Outstanding and can be settled via Bill-wise Allocation — instead of the Opening Balance being one untraceable lump sum. Leave empty to keep it as a single figure. These should add up to the Opening Balance above.</div>
+    <div id="openingBillRows">${openingBillsDraft.map((b,i)=>`
+      <div class="row" style="margin-bottom:8px;">
+        <input type="date" class="obDate" data-i="${i}" value="${b.date||''}" style="max-width:160px;">
+        <input type="text" class="obRef" data-i="${i}" placeholder="Reference (e.g. old invoice no.)" value="${escapeHtml(b.reference||'')}">
+        <input type="number" class="obAmount" data-i="${i}" placeholder="Amount (₹)" value="${b.amount||0}" style="max-width:140px;">
+        <button type="button" class="btn danger sm obRemoveBtn" data-i="${i}">Remove</button>
+      </div>`).join("") || `<div class="helptext" style="margin-bottom:8px;">No opening bills added.</div>`}</div>
+    <div class="row">
+      <button type="button" class="btn ghost sm" id="obAddRowBtn">+ Add Opening Bill</button>
+      <span class="helptext">Total: ₹${fmt(openingBillsDraft.reduce((s,b)=>s+(parseFloat(b.amount)||0),0))}</span>
     </div>
 
     <div class="section-title">Mailing Details</div>
@@ -2350,6 +2511,7 @@ function renderVouchersView(){
         <td${itemsTitle?` title="${escapeHtml(itemsTitle)}"`:''}>${v.narration||''}${items.length?` <span class="helptext">(${items.length} item${items.length>1?'s':''} — hover for details)</span>`:''}</td>
         <td class="num">${fmt(total)}</td>
         <td class="actions">
+          <button class="btn ghost sm editVoucherBtn">Edit</button>
           ${canConvert ? `<button class="btn ghost sm convertToInvoiceBtn">Convert to Invoice</button>` : ''}
           <button class="btn danger sm delVoucherBtn">Delete</button>
         </td>
@@ -2358,12 +2520,13 @@ function renderVouchersView(){
 
   return `
   <div class="card">
-    <h2>New Voucher</h2>
-    <div class="sub">Pick the voucher type that matches what actually happened. Not sure which? Hover over a type below, or see the one-line guide under the buttons.</div>
+    <h2>${voucherEditingId ? `Edit ${voucherTypeLabel(voucherType)}` : 'New Voucher'}</h2>
+    ${voucherEditingId ? `<p class="helptext">Editing ${voucherTypeLabel(voucherType)} ${(DB.vouchers.find(v=>v.id===voucherEditingId)||{}).voucherNo||''} — Save updates it in place (same voucher number). <button type="button" class="btn ghost sm" id="cancelVoucherEditBtn">Cancel, start new instead</button></p>`
+      : `<div class="sub">Pick the voucher type that matches what actually happened. Not sure which? Hover over a type below, or see the one-line guide under the buttons.</div>
     <div class="row" style="margin-bottom:6px;">
       ${types.map(([t,l])=>`<button class="btn ${voucherType===t?'gold':'ghost'} sm voucherTypeBtn" data-type="${t}" title="${escapeHtml(VOUCHER_TYPE_HELP[t]||'')}">${l}</button>`).join("")}
     </div>
-    <p class="helptext" style="margin-bottom:14px;">${escapeHtml(VOUCHER_TYPE_HELP[voucherType]||'')}</p>
+    <p class="helptext" style="margin-bottom:14px;">${escapeHtml(VOUCHER_TYPE_HELP[voucherType]||'')}</p>`}
     ${form}
   </div>
   <div class="card">
@@ -2439,6 +2602,25 @@ async function importVouchersCsv(text){
 // the Journal voucher's rows), and Save reads straight from that array.
 let voucherSalesPartyId = null;
 let voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
+let voucherRoundOff = 0; // manual +/- adjustment to round the grand total to a clean figure, posted to the Round Off ledger
+let voucherLedgerAcctId = null; // Sales/Purchase/Credit/Debit Note "Ledger" select
+let voucherCashBankId = null; // Payment/Receipt "Pay From"/"Receive Into" select
+let voucherContraFrom = null, voucherContraTo = null; // Contra's two account selects
+let voucherEditingId = null; // set when editing an existing voucher via startEditVoucher — Save then updates in place instead of creating a new one
+let voucherAmountDraft = 0; // Payment/Receipt/Contra "Amount" field — persisted so switching the target dropdown (which re-renders) never silently wipes a typed amount
+let voucherEditTds = 0; // Payment "TDS Deducted" field, prefilled when editing
+
+// Clears every piece of voucher-form draft state — call when switching
+// voucher type, after a successful Save, or when cancelling an edit.
+function resetVoucherFormState(){
+  voucherEditingId = null;
+  voucherPayRecTarget = null; paymentBillAllocDraft = {};
+  voucherSalesPartyId = null; voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}]; voucherRoundOff = 0;
+  voucherLedgerAcctId = null; voucherCashBankId = null;
+  voucherContraFrom = null; voucherContraTo = null;
+  voucherAmountDraft = 0; voucherEditTds = 0;
+  journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
+}
 
 function voucherItemRowAmount(r){ return round2((r.qty||0) * (r.rate||0) * (1 - (r.discountPct||0)/100)); }
 
@@ -2460,7 +2642,7 @@ function voucherFormSalesPurchase(type){
     return s + voucherItemRowAmount(r) * (item ? item.gstRate : 0)/100;
   },0));
   const cgst = isInterState ? 0 : round2(gstTotal/2);
-  const sgst = isInterState ? 0 : round2(gstTotal/2);
+  const sgst = isInterState ? 0 : round2(gstTotal-cgst); // absorb any 50/50-split paisa drift into SGST so Dr always exactly equals Cr
   const igst = isInterState ? gstTotal : 0;
   const grandTotal = round2(taxableValue + gstTotal);
 
@@ -2487,7 +2669,7 @@ function voucherFormSalesPurchase(type){
           : `<p class="helptext">No State on file for this party (Chart of Accounts → Edit → Mailing Details) — defaulting to same-state (CGST+SGST).</p>`}
       </div>
       <div class="field"><label>${isSales?"Sales":"Purchase"} Ledger</label>
-        <select id="v_account">${acctList.map(a=>`<option value="${a.id}" ${a.id===defaultAcc?'selected':''}>${a.name}</option>`).join("")}</select>
+        <select id="v_account">${acctList.map(a=>`<option value="${a.id}" ${a.id===(voucherLedgerAcctId||defaultAcc)?'selected':''}>${a.name}</option>`).join("")}</select>
       </div>
       <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
     </div>
@@ -2504,7 +2686,9 @@ function voucherFormSalesPurchase(type){
       ${isInterState
         ? `<div class="field"><label>IGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(igst)}</div></div>`
         : `<div class="field"><label>CGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(cgst)}</div></div><div class="field"><label>SGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(sgst)}</div></div>`}
-      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(grandTotal)}</div></div>
+      <div class="field"><label>Round Off (₹)</label><input type="number" step="0.01" id="v_roundoff" value="${voucherRoundOff}">
+        <button type="button" class="btn ghost sm" id="autoRoundBtn" style="margin-top:6px;">Round to nearest ₹</button></div>
+      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(round2(grandTotal+voucherRoundOff))}</div></div>
     </div>
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
 }
@@ -2535,7 +2719,7 @@ function voucherFormCreditDebitNote(type){
     return s + voucherItemRowAmount(r) * (item ? item.gstRate : 0)/100;
   },0));
   const cgst = isInterState ? 0 : round2(gstTotal/2);
-  const sgst = isInterState ? 0 : round2(gstTotal/2);
+  const sgst = isInterState ? 0 : round2(gstTotal-cgst); // absorb any 50/50-split paisa drift into SGST so Dr always exactly equals Cr
   const igst = isInterState ? gstTotal : 0;
   const grandTotal = round2(taxableValue + gstTotal);
 
@@ -2553,7 +2737,7 @@ function voucherFormCreditDebitNote(type){
     </tr>`;
   }).join("");
 
-  const bills = voucherSalesPartyId ? openBillsForParty(voucherSalesPartyId) : [];
+  const bills = voucherSalesPartyId ? openBillsForParty(voucherSalesPartyId, voucherEditingId) : [];
   const allocatedTotal = round2(bills.reduce((s,b)=>s+(paymentBillAllocDraft[b.voucher.id]||0),0));
   const billSectionHtml = !bills.length ? `<p class="helptext">No open bills for this party to adjust against — this ${isCredit?'credit':'debit'} note will just reduce their overall balance.</p>` : `
     <div class="section-title">Bill-wise Allocation (optional — which original bill is this adjusting?)</div>
@@ -2583,7 +2767,7 @@ function voucherFormCreditDebitNote(type){
           : `<p class="helptext">No State on file for this party — defaulting to same-state (CGST+SGST).</p>`}
       </div>
       <div class="field"><label>${isCredit?"Sales Return":"Purchase Return"} Ledger</label>
-        <select id="v_account">${acctList.map(a=>`<option value="${a.id}" ${a.id===defaultAcc?'selected':''}>${a.name}</option>`).join("")}</select>
+        <select id="v_account">${acctList.map(a=>`<option value="${a.id}" ${a.id===(voucherLedgerAcctId||defaultAcc)?'selected':''}>${a.name}</option>`).join("")}</select>
       </div>
       <div class="field"><label>Narration</label><input id="v_narration" placeholder="e.g. Sales return, rate difference"></div>
     </div>
@@ -2600,7 +2784,9 @@ function voucherFormCreditDebitNote(type){
       ${isInterState
         ? `<div class="field"><label>IGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(igst)}</div></div>`
         : `<div class="field"><label>CGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(cgst)}</div></div><div class="field"><label>SGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(sgst)}</div></div>`}
-      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(grandTotal)}</div></div>
+      <div class="field"><label>Round Off (₹)</label><input type="number" step="0.01" id="v_roundoff" value="${voucherRoundOff}">
+        <button type="button" class="btn ghost sm" id="autoRoundBtn" style="margin-top:6px;">Round to nearest ₹</button></div>
+      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(round2(grandTotal+voucherRoundOff))}</div></div>
     </div>
     ${billSectionHtml}
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${isCredit?'Credit':'Debit'} Note</button>`;
@@ -2679,7 +2865,7 @@ function voucherFormPaymentReceipt(type){
     voucherPayRecTarget = partyList.length ? `party:${partyList[0].id}` : (otherAccts.length ? `acct:${otherAccts[0].id}` : "");
   }
   const [targetKind, targetId] = (voucherPayRecTarget||"").split(":");
-  const bills = targetKind==="party" ? openBillsForParty(targetId) : [];
+  const bills = targetKind==="party" ? openBillsForParty(targetId, voucherEditingId) : [];
   const allocatedTotal = round2(bills.reduce((s,b)=>s+(paymentBillAllocDraft[b.voucher.id]||0),0));
 
   const billSectionHtml = targetKind!=="party" ? '' : (bills.length ? `
@@ -2706,7 +2892,7 @@ function voucherFormPaymentReceipt(type){
     <div class="grid grid-4">
       <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
       <div class="field"><label>${isPayment?"Pay From":"Receive Into"}</label>
-        <select id="v_cashbank">${cashBankAccounts().map(a=>`<option value="${a.id}">${a.name}</option>`).join("")}</select>
+        <select id="v_cashbank">${cashBankAccounts().map(a=>`<option value="${a.id}" ${a.id===(voucherCashBankId||(cashBankAccounts()[0]&&cashBankAccounts()[0].id))?'selected':''}>${a.name}</option>`).join("")}</select>
       </div>
       <div class="field"><label>${isPayment?"Pay To":"Receive From"}</label>
         <select id="v_target">
@@ -2718,21 +2904,25 @@ function voucherFormPaymentReceipt(type){
           </optgroup>
         </select>
       </div>
-      <div class="field"><label>Amount (₹)</label><input type="number" id="v_amount" value="0"></div>
+      <div class="field"><label>Amount (₹)</label><input type="number" id="v_amount" value="${voucherAmountDraft}"></div>
       <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
+      ${isPayment && targetKind==="party" ? `<div class="field"><label>TDS Deducted (₹)</label><input type="number" id="v_tds" min="0" value="${voucherEditTds}"></div>` : ''}
     </div>
+    ${isPayment && targetKind==="party" ? `<p class="helptext">Full Amount still settles the vendor's payable; TDS is withheld from the actual bank/cash payout and posted to TDS Payable (Vendors) — separate from payroll TDS.</p>` : ''}
     ${billSectionHtml}
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
 }
 
 function voucherFormContra(){
   const cb = cashBankAccounts();
+  if(voucherContraFrom===null) voucherContraFrom = cb.length ? cb[0].id : "";
+  if(voucherContraTo===null) voucherContraTo = cb.length>1 ? cb[1].id : (cb.length?cb[0].id:"");
   return `
     <div class="grid grid-4">
       <div class="field"><label>Date</label><input type="date" id="v_date" value="${new Date().toISOString().slice(0,10)}"></div>
-      <div class="field"><label>From</label><select id="v_from">${cb.map(a=>`<option value="${a.id}">${a.name}</option>`).join("")}</select></div>
-      <div class="field"><label>To</label><select id="v_to">${cb.map(a=>`<option value="${a.id}">${a.name}</option>`).join("")}</select></div>
-      <div class="field"><label>Amount (₹)</label><input type="number" id="v_amount" value="0"></div>
+      <div class="field"><label>From</label><select id="v_from">${cb.map(a=>`<option value="${a.id}" ${a.id===voucherContraFrom?'selected':''}>${a.name}</option>`).join("")}</select></div>
+      <div class="field"><label>To</label><select id="v_to">${cb.map(a=>`<option value="${a.id}" ${a.id===voucherContraTo?'selected':''}>${a.name}</option>`).join("")}</select></div>
+      <div class="field"><label>Amount (₹)</label><input type="number" id="v_amount" value="${voucherAmountDraft}"></div>
       <div class="field"><label>Narration</label><input id="v_narration" placeholder="Optional"></div>
     </div>
     <button class="btn gold" id="saveVoucherBtn" data-kind="Contra">Save Contra Voucher</button>`;
@@ -4982,6 +5172,11 @@ function attachHandlers(){
         const [nature, accGroup] = val("acc_group").split("|");
         const isPartyType = val("acc_isparty");
         const openingBalance = parseFloat(val("acc_opening"))||0;
+        const obRefs = document.querySelectorAll(".obRef"), obAmts = document.querySelectorAll(".obAmount");
+        const openingBills = Array.from(document.querySelectorAll(".obDate")).map((el,i)=>(
+          { id: (openingBillsDraft[i]&&openingBillsDraft[i].id) || newId("OB"), date: el.value, reference: obRefs[i].value.trim(), amount: parseFloat(obAmts[i].value)||0 }
+        )).filter(b=>b.date && b.amount>0);
+        if(openingBills.some(b=>b.amount<0)){ toast("Opening bill amounts cannot be negative.", true); return; }
         const details = {
           alias: val("acc_alias").trim(),
           mailingName: val("acc_mailingName").trim(), address: val("acc_address").trim(),
@@ -4991,6 +5186,7 @@ function attachHandlers(){
           bankHolderName: val("acc_bankHolder").trim(), bankAccountNo: val("acc_bankAccNo").trim(),
           ifsc: val("acc_ifsc").trim(), swift: val("acc_swift").trim(),
           bankName: val("acc_bankName").trim(), branch: val("acc_branch").trim(),
+          openingBills,
         };
         if(editingId){
           const row = { name, acc_group: accGroup, nature, is_party: !!isPartyType,
@@ -5002,7 +5198,7 @@ function attachHandlers(){
             isParty:!!isPartyType, partyType:isPartyType||null, openingBalance, details};
           await logAudit("update", "ledger_accounts", editingId, {name});
           toast("Account updated.");
-          accEditingId = null;
+          accEditingId = null; openingBillsDraft = [];
         } else {
           const id = newId("ACC");
           const row = { id, name, acc_group: accGroup, nature, is_party: !!isPartyType,
@@ -5014,17 +5210,35 @@ function attachHandlers(){
             openingBalance, openingBalanceType:"Dr", isSystem:false, details});
           await logAudit("create", "ledger_accounts", id, {name});
           toast("Account added.");
+          openingBillsDraft = [];
         }
         renderAll();
       };
       document.querySelectorAll(".editAccBtn").forEach(b=>b.onclick=(e)=>{
         accEditingId = e.target.closest("tr").dataset.id;
+        const acc = DB.ledgerAccounts.find(a=>a.id===accEditingId);
+        openingBillsDraft = (acc && acc.details && acc.details.openingBills || []).map(b=>({...b}));
         renderAll();
         const el = document.getElementById("acc_name");
         if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
       });
       const cancelAccEditBtn = document.getElementById("cancelAccEditBtn");
-      if(cancelAccEditBtn) cancelAccEditBtn.onclick = ()=>{ accEditingId = null; renderAll(); };
+      if(cancelAccEditBtn) cancelAccEditBtn.onclick = ()=>{ accEditingId = null; openingBillsDraft = []; renderAll(); };
+      const syncOpeningBillsDraft = ()=>{
+        const dates = document.querySelectorAll(".obDate"), refs = document.querySelectorAll(".obRef"), amts = document.querySelectorAll(".obAmount");
+        openingBillsDraft = Array.from(dates).map((el,i)=>({id:(openingBillsDraft[i]&&openingBillsDraft[i].id)||newId("OB"), date:el.value, reference:refs[i].value, amount:parseFloat(amts[i].value)||0}));
+      };
+      const obAddRowBtn = document.getElementById("obAddRowBtn");
+      if(obAddRowBtn) obAddRowBtn.onclick = ()=>{
+        syncOpeningBillsDraft();
+        openingBillsDraft.push({id:newId("OB"), date:new Date().toISOString().slice(0,10), reference:"", amount:0});
+        renderAll();
+      };
+      document.querySelectorAll(".obRemoveBtn").forEach(b=>b.onclick=()=>{
+        syncOpeningBillsDraft();
+        openingBillsDraft.splice(parseInt(b.dataset.i), 1);
+        renderAll();
+      });
       document.querySelectorAll(".delAccBtn").forEach(b=>b.onclick=async (e)=>{
         const id = e.target.closest("tr").dataset.id;
         if(DB.voucherLines.some(l=>l.accountId===id)){ toast("Can't delete — this account has transactions. Delete those vouchers first.", true); return; }
@@ -5041,10 +5255,11 @@ function attachHandlers(){
     if(booksView==="vouchers"){
       document.querySelectorAll(".voucherTypeBtn").forEach(b=>b.onclick=()=>{
         voucherType = b.dataset.type;
-        voucherPayRecTarget = null; paymentBillAllocDraft = {};
-        voucherSalesPartyId = null; voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
+        resetVoucherFormState();
         renderAll();
       });
+      const cancelVoucherEditBtn = document.getElementById("cancelVoucherEditBtn");
+      if(cancelVoucherEditBtn) cancelVoucherEditBtn.onclick = ()=>{ resetVoucherFormState(); renderAll(); };
       document.getElementById("loadDayBookBtn").onclick = ()=>{
         booksDayRange = {from: val("db_from"), to: val("db_to")}; renderAll();
       };
@@ -5080,6 +5295,12 @@ function attachHandlers(){
         await deleteVoucher(id);
         renderAll();
       });
+      document.querySelectorAll(".editVoucherBtn").forEach(b=>b.onclick=(e)=>{
+        const id = e.target.closest("tr").dataset.id;
+        startEditVoucher(id);
+        renderAll();
+        window.scrollTo({top:0, behavior:"smooth"});
+      });
       document.querySelectorAll(".convertToInvoiceBtn").forEach(b=>b.onclick=(e)=>{
         const srcId = e.target.closest("tr").dataset.id;
         const src = DB.vouchers.find(v=>v.id===srcId);
@@ -5097,6 +5318,12 @@ function attachHandlers(){
       });
 
       if(voucherType==="Payment" || voucherType==="Receipt"){
+        const cashBankSel = document.getElementById("v_cashbank");
+        if(cashBankSel) cashBankSel.onchange = (e)=>{ voucherCashBankId = e.target.value; };
+        const amountInp = document.getElementById("v_amount");
+        if(amountInp) amountInp.oninput = ()=>{ voucherAmountDraft = parseFloat(amountInp.value)||0; };
+        const tdsInp = document.getElementById("v_tds");
+        if(tdsInp) tdsInp.oninput = ()=>{ voucherEditTds = parseFloat(tdsInp.value)||0; };
         const targetSel = document.getElementById("v_target");
         if(targetSel) targetSel.onchange = (e)=>{
           voucherPayRecTarget = e.target.value;
@@ -5109,7 +5336,7 @@ function attachHandlers(){
           if(targetKind!=="party") return;
           let remaining = parseFloat(val("v_amount"))||0;
           paymentBillAllocDraft = {};
-          for(const b of openBillsForParty(targetId)){
+          for(const b of openBillsForParty(targetId, voucherEditingId)){
             if(remaining<=0) break;
             const alloc = Math.min(b.outstanding, remaining);
             paymentBillAllocDraft[b.voucher.id] = alloc;
@@ -5124,6 +5351,8 @@ function attachHandlers(){
       if(voucherType==="Sales" || voucherType==="Purchase" || voucherType==="CreditNote" || voucherType==="DebitNote" || NON_ACCOUNTING_VOUCHER_TYPES.includes(voucherType)){
         const partySel = document.getElementById("v_party");
         if(partySel) partySel.onchange = (e)=>{ voucherSalesPartyId = e.target.value; paymentBillAllocDraft = {}; renderAll(); };
+        const ledgerSel = document.getElementById("v_account");
+        if(ledgerSel) ledgerSel.onchange = (e)=>{ voucherLedgerAcctId = e.target.value; };
         document.getElementById("viAddRowBtn").onclick = ()=>{
           voucherItemRows.push({stockItemId:"", qty:1, rate:0, discountPct:0});
           renderAll();
@@ -5144,6 +5373,20 @@ function attachHandlers(){
         document.querySelectorAll(".viRate").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].rate = parseFloat(inp.value)||0; });
         document.querySelectorAll(".viDisc").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].discountPct = parseFloat(inp.value)||0; });
 
+        const roundOffInp = document.getElementById("v_roundoff");
+        if(roundOffInp) roundOffInp.oninput = ()=>{ voucherRoundOff = parseFloat(roundOffInp.value)||0; };
+        const autoRoundBtn = document.getElementById("autoRoundBtn");
+        if(autoRoundBtn) autoRoundBtn.onclick = ()=>{
+          const taxableValue = round2(voucherItemRows.reduce((s,r)=>s+voucherItemRowAmount(r),0));
+          const gstTotal = round2(voucherItemRows.reduce((s,r)=>{
+            const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+            return s + voucherItemRowAmount(r) * (item?item.gstRate:0)/100;
+          },0));
+          const rawTotal = taxableValue + gstTotal;
+          voucherRoundOff = round2(Math.round(rawTotal) - rawTotal);
+          renderAll();
+        };
+
         if(voucherType==="CreditNote" || voucherType==="DebitNote"){
           const autoAllocBtn = document.getElementById("autoAllocBillsBtn");
           if(autoAllocBtn) autoAllocBtn.onclick = ()=>{
@@ -5153,7 +5396,7 @@ function attachHandlers(){
               return s + voucherItemRowAmount(r) * (1 + (item?item.gstRate:0)/100);
             },0));
             paymentBillAllocDraft = {};
-            for(const b of openBillsForParty(voucherSalesPartyId)){
+            for(const b of openBillsForParty(voucherSalesPartyId, voucherEditingId)){
               if(remaining<=0) break;
               const alloc = Math.min(b.outstanding, remaining);
               paymentBillAllocDraft[b.voucher.id] = alloc;
@@ -5164,6 +5407,14 @@ function attachHandlers(){
           const clearAllocBtn = document.getElementById("clearBillAllocBtn");
           if(clearAllocBtn) clearAllocBtn.onclick = ()=>{ paymentBillAllocDraft = {}; renderAll(); };
         }
+      }
+
+      if(voucherType==="Contra"){
+        const fromSel = document.getElementById("v_from"), toSel = document.getElementById("v_to");
+        if(fromSel) fromSel.onchange = (e)=>{ voucherContraFrom = e.target.value; };
+        if(toSel) toSel.onchange = (e)=>{ voucherContraTo = e.target.value; };
+        const amountInp = document.getElementById("v_amount");
+        if(amountInp) amountInp.oninput = ()=>{ voucherAmountDraft = parseFloat(amountInp.value)||0; };
       }
 
       if(voucherType==="Journal"){
@@ -5184,6 +5435,11 @@ function attachHandlers(){
         const date = val("v_date");
         const narration = val("v_narration");
         let voucher, lines;
+        // Editing an existing voucher keeps its id and voucher number —
+        // only a brand-new one gets a fresh id and the next auto number.
+        const editingVoucher = voucherEditingId ? DB.vouchers.find(v=>v.id===voucherEditingId) : null;
+        const vId = editingVoucher ? editingVoucher.id : newId("VCH");
+        const vNo = editingVoucher ? editingVoucher.voucherNo : nextVoucherNo(kind);
 
         if(kind==="Sales" || kind==="Purchase"){
           const partyId = val("v_party");
@@ -5203,24 +5459,28 @@ function attachHandlers(){
             return s + voucherItemRowAmount(r) * (item?item.gstRate:0)/100;
           },0));
           const cgst = isInterState ? 0 : round2(gstTotal/2);
-          const sgst = isInterState ? 0 : round2(gstTotal/2);
+          const sgst = isInterState ? 0 : round2(gstTotal-cgst); // absorb any 50/50-split paisa drift into SGST so Dr always exactly equals Cr
           const igst = isInterState ? gstTotal : 0;
 
-          voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date, partyId, narration};
+          const roundOffAmt = round2(parseFloat(val("v_roundoff"))||0);
+
+          voucher = {id:vId, voucherType:kind, voucherNo:vNo, date, partyId, narration};
           if(kind==="Sales"){
             lines = [
-              {accountId:partyId, debit:taxableValue+gstTotal, credit:0},
+              {accountId:partyId, debit:taxableValue+gstTotal+roundOffAmt, credit:0},
               {accountId:acctId, debit:0, credit:taxableValue},
             ];
             if(isInterState){ if(igst>0) lines.push({accountId:SYS_ACCOUNTS.igstPayable, debit:0, credit:igst}); }
             else { if(cgst>0) lines.push({accountId:SYS_ACCOUNTS.cgstPayable, debit:0, credit:cgst}); if(sgst>0) lines.push({accountId:SYS_ACCOUNTS.sgstPayable, debit:0, credit:sgst}); }
+            const ro = roundOffLine(roundOffAmt, true); if(ro) lines.push(ro);
           } else {
             lines = [
               {accountId:acctId, debit:taxableValue, credit:0},
-              {accountId:partyId, debit:0, credit:taxableValue+gstTotal},
+              {accountId:partyId, debit:0, credit:taxableValue+gstTotal+roundOffAmt},
             ];
             if(isInterState){ if(igst>0) lines.push({accountId:SYS_ACCOUNTS.igstInput, debit:igst, credit:0}); }
             else { if(cgst>0) lines.push({accountId:SYS_ACCOUNTS.cgstInput, debit:cgst, credit:0}); if(sgst>0) lines.push({accountId:SYS_ACCOUNTS.sgstInput, debit:sgst, credit:0}); }
+            const ro = roundOffLine(roundOffAmt, false); if(ro) lines.push(ro);
           }
           voucher._items = validRows.map(r=>{
             const item = DB.stockItems.find(x=>x.id===r.stockItemId);
@@ -5247,9 +5507,10 @@ function attachHandlers(){
             return s + voucherItemRowAmount(r) * (item?item.gstRate:0)/100;
           },0));
           const cgst = isInterState ? 0 : round2(gstTotal/2);
-          const sgst = isInterState ? 0 : round2(gstTotal/2);
+          const sgst = isInterState ? 0 : round2(gstTotal-cgst); // absorb any 50/50-split paisa drift into SGST so Dr always exactly equals Cr
           const igst = isInterState ? gstTotal : 0;
-          const noteTotal = round2(taxableValue + gstTotal);
+          const roundOffAmt = round2(parseFloat(val("v_roundoff"))||0);
+          const noteTotal = round2(taxableValue + gstTotal + roundOffAmt);
 
           const billAllocs = Array.from(document.querySelectorAll(".billAllocInput"))
             .map(inp=>({billVoucherId: inp.dataset.bill, amount: parseFloat(inp.value)||0}))
@@ -5258,7 +5519,7 @@ function attachHandlers(){
           const allocTotal = round2(billAllocs.reduce((s,a)=>s+a.amount,0));
           if(allocTotal > noteTotal + 0.01){ toast(`Bill allocations (₹${fmt(allocTotal)}) can't exceed the note total (₹${fmt(noteTotal)}).`, true); return; }
           if(billAllocs.length){
-            const openBills = openBillsForParty(partyId);
+            const openBills = openBillsForParty(partyId, voucherEditingId);
             for(const a of billAllocs){
               const bill = openBills.find(b=>b.voucher.id===a.billVoucherId);
               if(bill && a.amount > bill.outstanding + 0.01){
@@ -5268,23 +5529,25 @@ function attachHandlers(){
             }
           }
 
-          voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date, partyId, narration};
+          voucher = {id:vId, voucherType:kind, voucherNo:vNo, date, partyId, narration};
           if(kind==="CreditNote"){
             // Reverses a Sale: reduce what the customer owes, reduce Sales income, reduce output GST liability.
             lines = [
-              {accountId:partyId, debit:0, credit:taxableValue+gstTotal},
+              {accountId:partyId, debit:0, credit:taxableValue+gstTotal+roundOffAmt},
               {accountId:acctId, debit:taxableValue, credit:0},
             ];
             if(isInterState){ if(igst>0) lines.push({accountId:SYS_ACCOUNTS.igstPayable, debit:igst, credit:0}); }
             else { if(cgst>0) lines.push({accountId:SYS_ACCOUNTS.cgstPayable, debit:cgst, credit:0}); if(sgst>0) lines.push({accountId:SYS_ACCOUNTS.sgstPayable, debit:sgst, credit:0}); }
+            const ro = roundOffLine(roundOffAmt, false); if(ro) lines.push(ro);
           } else {
             // Reverses a Purchase: reduce what's owed to the vendor, reduce Purchase expense, reduce input GST credit.
             lines = [
-              {accountId:partyId, debit:taxableValue+gstTotal, credit:0},
+              {accountId:partyId, debit:taxableValue+gstTotal+roundOffAmt, credit:0},
               {accountId:acctId, debit:0, credit:taxableValue},
             ];
             if(isInterState){ if(igst>0) lines.push({accountId:SYS_ACCOUNTS.igstInput, debit:0, credit:igst}); }
             else { if(cgst>0) lines.push({accountId:SYS_ACCOUNTS.cgstInput, debit:0, credit:cgst}); if(sgst>0) lines.push({accountId:SYS_ACCOUNTS.sgstInput, debit:0, credit:sgst}); }
+            const ro = roundOffLine(roundOffAmt, true); if(ro) lines.push(ro);
           }
           voucher._items = validRows.map(r=>{
             const item = DB.stockItems.find(x=>x.id===r.stockItemId);
@@ -5303,7 +5566,7 @@ function attachHandlers(){
 
           let billAllocs = [];
           if(targetKind==="party"){
-            const openBills = openBillsForParty(targetId);
+            const openBills = openBillsForParty(targetId, voucherEditingId);
             billAllocs = Array.from(document.querySelectorAll(".billAllocInput"))
               .map(inp=>({billVoucherId: inp.dataset.bill, amount: parseFloat(inp.value)||0}))
               .filter(a=>a.amount>0);
@@ -5319,10 +5582,15 @@ function attachHandlers(){
             }
           }
 
-          voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date,
+          const tdsAmount = (kind==="Payment" && targetKind==="party") ? round2(parseFloat(val("v_tds"))||0) : 0;
+          if(tdsAmount > amount){ toast("TDS deducted cannot exceed the payment Amount.", true); return; }
+
+          voucher = {id:vId, voucherType:kind, voucherNo:vNo, date,
             partyId: targetKind==="party" ? targetId : null, narration};
           if(kind==="Payment"){
-            lines = [{accountId:targetId, debit:amount, credit:0}, {accountId:cashBankId, debit:0, credit:amount}];
+            const netCash = round2(amount - tdsAmount);
+            lines = [{accountId:targetId, debit:amount, credit:0}, {accountId:cashBankId, debit:0, credit:netCash}];
+            if(tdsAmount>0) lines.push({accountId:SYS_ACCOUNTS.tdsPayableVendor, debit:0, credit:tdsAmount});
           } else {
             lines = [{accountId:cashBankId, debit:amount, credit:0}, {accountId:targetId, debit:0, credit:amount}];
           }
@@ -5332,10 +5600,10 @@ function attachHandlers(){
           const amount = parseFloat(val("v_amount"))||0;
           if(from===to){ toast("From and To must be different accounts.", true); return; }
           if(amount<=0){ toast("Enter a positive amount.", true); return; }
-          voucher = {id:newId("VCH"), voucherType:"Contra", voucherNo:nextVoucherNo("Contra"), date, partyId:null, narration};
+          voucher = {id:vId, voucherType:"Contra", voucherNo:vNo, date, partyId:null, narration};
           lines = [{accountId:to, debit:amount, credit:0}, {accountId:from, debit:0, credit:amount}];
         } else if(kind==="Journal"){
-          voucher = {id:newId("VCH"), voucherType:"Journal", voucherNo:nextVoucherNo("Journal"), date, partyId:null, narration};
+          voucher = {id:vId, voucherType:"Journal", voucherNo:vNo, date, partyId:null, narration};
           lines = journalRows.filter(r=>r.account && ((r.debit||0)>0 || (r.credit||0)>0))
             .map(r=>({accountId:r.account, debit:parseFloat(r.debit)||0, credit:parseFloat(r.credit)||0}));
         } else if(NON_ACCOUNTING_VOUCHER_TYPES.includes(kind)){
@@ -5344,7 +5612,7 @@ function attachHandlers(){
           const validRows = voucherItemRows.filter(r=>r.stockItemId && voucherItemRowAmount(r)>0);
           if(!validRows.length){ toast("Add at least one item with a stock item, quantity, and rate.", true); return; }
           const reference = val("v_reference").trim();
-          voucher = {id:newId("VCH"), voucherType:kind, voucherNo:nextVoucherNo(kind), date, partyId, narration, reference};
+          voucher = {id:vId, voucherType:kind, voucherNo:vNo, date, partyId, narration, reference};
           voucher._items = validRows.map(r=>{
             const item = DB.stockItems.find(x=>x.id===r.stockItemId);
             const amount = voucherItemRowAmount(r);
@@ -5358,9 +5626,13 @@ function attachHandlers(){
         const billAllocs = voucher._billAllocs; delete voucher._billAllocs;
         const items = voucher._items; delete voucher._items;
         const nonAccounting = voucher._nonAccounting; delete voucher._nonAccounting;
-        const ok = nonAccounting ? await saveNonAccountingVoucher(voucher, items) : await saveVoucher(voucher, lines);
-        if(ok){
-          if(!nonAccounting){
+
+        let ok;
+        if(editingVoucher){
+          ok = await updateVoucherChildren(voucher, nonAccounting ? [] : lines, items, billAllocs);
+        } else {
+          ok = nonAccounting ? await saveNonAccountingVoucher(voucher, items) : await saveVoucher(voucher, lines);
+          if(ok && !nonAccounting){
             if(billAllocs && billAllocs.length){
               billAllocs.forEach(a=> DB.billAllocations.push({id:newId("BA"), voucherId:voucher.id, billVoucherId:a.billVoucherId, amount:a.amount}));
               await save("billAllocations");
@@ -5370,10 +5642,10 @@ function attachHandlers(){
               await save("voucherItems");
             }
           }
-          toast(voucherTypeLabel(kind) + " saved.");
-          if(kind==="Journal") journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
-          voucherPayRecTarget = null; paymentBillAllocDraft = {};
-          voucherSalesPartyId = null; voucherItemRows = [{stockItemId:"", qty:1, rate:0, discountPct:0}];
+        }
+        if(ok){
+          toast(voucherTypeLabel(kind) + (editingVoucher ? " updated." : " saved."));
+          resetVoucherFormState();
           renderAll();
         }
       };
