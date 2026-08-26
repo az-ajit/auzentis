@@ -370,8 +370,10 @@ const TABLE_CONFIG = {
     toRow:a=>({id:a.id,voucher_id:a.voucherId,bill_voucher_id:a.billVoucherId,amount:a.amount}),
     fromRow:r=>({id:r.id,voucherId:r.voucher_id,billVoucherId:r.bill_voucher_id,amount:Number(r.amount)}) },
   stockItems: { table:"stock_items",
-    toRow:i=>({id:i.id,name:i.name,hsn_code:i.hsnCode||null,unit:i.unit||null,gst_rate:i.gstRate||0,default_rate:i.defaultRate||0}),
-    fromRow:r=>({id:r.id,name:r.name,hsnCode:r.hsn_code||'',unit:r.unit||'',gstRate:Number(r.gst_rate||0),defaultRate:Number(r.default_rate||0)}) },
+    toRow:i=>({id:i.id,name:i.name,hsn_code:i.hsnCode||null,unit:i.unit||null,gst_rate:i.gstRate||0,default_rate:i.defaultRate||0,
+      opening_qty:i.openingQty||0, opening_rate:i.openingRate||0}),
+    fromRow:r=>({id:r.id,name:r.name,hsnCode:r.hsn_code||'',unit:r.unit||'',gstRate:Number(r.gst_rate||0),defaultRate:Number(r.default_rate||0),
+      openingQty:Number(r.opening_qty||0), openingRate:Number(r.opening_rate||0)}) },
   voucherItems: { table:"voucher_items",
     toRow:i=>({id:i.id,voucher_id:i.voucherId,stock_item_id:i.stockItemId||null,description:i.description,hsn_code:i.hsnCode||null,
       qty:i.qty,rate:i.rate,discount_pct:i.discountPct||0,amount:i.amount,gst_rate:i.gstRate||0,gst_amount:i.gstAmount||0}),
@@ -2328,6 +2330,7 @@ function renderBooksGuide(){
       <ul style="margin:0; padding:0 0 0 20px;">
         <li><b>Party Ledgers</b> - what a specific customer/vendor owes, aging, and which bills are still open.</li>
         <li><b>Bank Reconciliation</b> - tick off transactions against your actual bank statement to see what hasn't cleared yet.</li>
+        <li><b>Stock Summary</b> - quantity and weighted-average value on hand per item, from Opening Qty/Rate (set on the item) plus every Sales/Purchase/Credit/Debit Note since. Reporting only - never posts to the ledger.</li>
         <li><b>GST Summary</b> - HSN-wise tax totals for a filing period.</li>
         <li><b>Trial Balance</b> - sanity check that everything still balances.</li>
         <li><b>Profit &amp; Loss</b> - income vs expense for a period.</li>
@@ -2338,12 +2341,13 @@ function renderBooksGuide(){
 }
 
 function renderBooks(){
-  const views = [["vouchers","Vouchers"],["items","Stock Items"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["reconcile","Bank Reconciliation"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
+  const views = [["vouchers","Vouchers"],["items","Stock Items"],["stock","Stock Summary"],["accounts","Chart of Accounts"],["parties","Party Ledgers"],["reconcile","Bank Reconciliation"],["gst","GST Summary"],["trial","Trial Balance"],["pnl","Profit & Loss"],["balance","Balance Sheet"]];
   const nav = `<div class="row" style="margin-bottom:14px;">${views.map(([k,l])=>
     `<button class="btn ${booksView===k?'gold':'ghost'} sm booksNavBtn" data-view="${k}">${l}</button>`).join("")}</div>`;
 
   let body;
   if(booksView==="items") body = renderStockItems();
+  else if(booksView==="stock") body = renderStockSummary();
   else if(booksView==="accounts") body = renderChartOfAccounts();
   else if(booksView==="parties") body = renderPartyLedgers();
   else if(booksView==="reconcile") body = renderBankReconciliation();
@@ -2359,24 +2363,27 @@ function renderBooks(){
 // ---- Stock Items (item master for item-wise invoicing - no stock-on-hand/valuation tracking) ----
 let itemEditingId = null;
 function renderStockItems(){
-  const rows = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`
+  const rows = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(i=>{
+    const stk = itemStockPosition(i.id);
+    return `
     <tr data-id="${i.id}">
       <td>${escapeHtml(i.name)}</td><td>${escapeHtml(i.hsnCode||'-')}</td><td>${escapeHtml(i.unit||'-')}</td>
       <td class="num">${i.gstRate}%</td><td class="num">${fmt(i.defaultRate)}</td>
+      <td class="num" style="color:${stk.qty<0?'var(--danger)':''}">${stk.qty}${stk.qty<0?' ⚠':''}</td>
       <td class="actions">
         <button class="btn ghost sm editItemBtn">Edit</button>
         <button class="btn danger sm delItemBtn">Delete</button>
       </td>
-    </tr>`).join("");
+    </tr>`;}).join("");
   const editing = itemEditingId ? DB.stockItems.find(i=>i.id===itemEditingId) : null;
   return `
   <div class="card">
     <h2>Stock Items</h2>
-    <div class="sub">Items/services you invoice against - used for item-wise Sales/Purchase vouchers (qty, rate, HSN, GST % per line). This is an item master for invoicing only; it doesn't track stock-on-hand or valuation.</div>
+    <div class="sub">Items/services you invoice against - used for item-wise Sales/Purchase vouchers (qty, rate, HSN, GST % per line). Opening Qty/Rate seed the Stock Summary report (Books → Stock Summary), which tracks quantity and weighted-average value from your Sales/Purchase/Credit/Debit Note history.</div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Name</th><th>HSN/SAC Code</th><th>Unit</th><th>GST %</th><th>Default Rate (₹)</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">No items yet.</td></tr>`}</tbody>
+        <thead><tr><th>Name</th><th>HSN/SAC Code</th><th>Unit</th><th>GST %</th><th>Default Rate (₹)</th><th>Stock on Hand</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No items yet.</td></tr>`}</tbody>
       </table>
     </div>
     <div class="section-title">${editing ? `Edit Item - ${escapeHtml(editing.name)}` : 'Add Item'}</div>
@@ -2387,7 +2394,10 @@ function renderStockItems(){
       <div class="field"><label>Unit</label><input id="item_unit" placeholder="e.g. Pcs, Kg, Nos" value="${editing?escapeHtml(editing.unit||''):''}"></div>
       <div class="field"><label>GST %</label><input type="number" id="item_gst" value="${editing?editing.gstRate:18}"></div>
       <div class="field"><label>Default Rate (₹)</label><input type="number" id="item_rate" value="${editing?editing.defaultRate:0}"></div>
+      <div class="field"><label>Opening Qty</label><input type="number" id="item_openingQty" value="${editing?editing.openingQty:0}"></div>
+      <div class="field"><label>Opening Rate (₹/unit)</label><input type="number" id="item_openingRate" value="${editing?editing.openingRate:0}"></div>
     </div>
+    <p class="helptext">Opening Qty/Rate can only be changed while there's no Sales/Purchase history for this item yet - once vouchers reference it, edit stock levels by recording an actual transaction instead, so the trail stays accurate.</p>
     <div class="row">
       <button class="btn gold" id="saveItemBtn">${editing ? 'Save Changes' : 'Add Item'}</button>
       ${editing ? `<button class="btn ghost" id="cancelItemEditBtn">Cancel Edit</button>` : ''}
@@ -3025,6 +3035,114 @@ function renderPartyLedgers(){
     <div class="row"><select id="partySelect" style="max-width:280px;"><option value="">Select a party…</option>${partyOptions}</select></div>
   </div>
   ${detail}`;
+}
+
+// ---- Stock Summary (weighted-average valuation, reporting only) ----
+// Deliberately NOT integrated with accounting: Sales/Purchase vouchers post
+// to the ledger exactly as before (Sales/Purchase account, party, GST) —
+// this report is a separate read-only view computed from the same
+// voucher_items history, matching Tally's default (un-integrated)
+// inventory behavior. Only Sales/Purchase/Credit Note/Debit Note count;
+// Sales/Purchase Orders and Delivery/Receipt Notes are pre-invoice
+// trackers and are excluded so a later "Convert to Invoice" never
+// double-counts the same movement.
+function itemStockMovements(itemId, asOfDate){
+  return DB.voucherItems.filter(i=>i.stockItemId===itemId).map(i=>{
+    const v = DB.vouchers.find(x=>x.id===i.voucherId);
+    return { item:i, voucher:v };
+  }).filter(x=>x.voucher && !NON_ACCOUNTING_VOUCHER_TYPES.includes(x.voucher.voucherType) && (!asOfDate || x.voucher.date<=asOfDate))
+    .sort((a,b)=>a.voucher.date.localeCompare(b.voucher.date));
+}
+
+// Weighted-average stock position as of a date: processes opening stock
+// plus every Purchase/CreditNote (inward) and Sales/DebitNote (outward) in
+// date order. Inward moves blend into the running average cost; outward
+// moves are costed at whatever the average was just before that movement.
+function itemStockPosition(itemId, asOfDate){
+  const it = DB.stockItems.find(x=>x.id===itemId);
+  let qty = (it && it.openingQty) || 0;
+  let value = qty * ((it && it.openingRate) || 0);
+  let purchasedQty = 0, soldQty = 0, returnedInQty = 0, returnedOutQty = 0;
+
+  itemStockMovements(itemId, asOfDate).forEach(({item, voucher})=>{
+    const isInward = voucher.voucherType==="Purchase" || voucher.voucherType==="CreditNote";
+    if(isInward){
+      qty += item.qty; value += item.qty * item.rate;
+      if(voucher.voucherType==="Purchase") purchasedQty += item.qty; else returnedInQty += item.qty;
+    } else {
+      const avgRate = qty>0 ? value/qty : 0;
+      value -= item.qty * avgRate;
+      qty -= item.qty;
+      if(voucher.voucherType==="Sales") soldQty += item.qty; else returnedOutQty += item.qty;
+    }
+  });
+  return { qty: round2(qty), value: round2(value), avgRate: qty>0.001 ? round2(value/qty) : 0,
+    purchasedQty: round2(purchasedQty), soldQty: round2(soldQty), returnedInQty: round2(returnedInQty), returnedOutQty: round2(returnedOutQty) };
+}
+
+let stockLedgerItemId = null;
+function renderStockSummary(){
+  if(stockLedgerItemId===null) stockLedgerItemId = DB.stockItems.length ? DB.stockItems[0].id : "";
+  const rows = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(it=>{
+    const pos = itemStockPosition(it.id);
+    return `<tr data-id="${it.id}">
+      <td>${escapeHtml(it.name)}</td>
+      <td class="num">${it.openingQty||0}</td>
+      <td class="num">${pos.purchasedQty}</td>
+      <td class="num">${pos.soldQty}</td>
+      <td class="num">${pos.returnedInQty}</td>
+      <td class="num">${pos.returnedOutQty}</td>
+      <td class="num" style="color:${pos.qty<0?'var(--danger)':''}"><b>${pos.qty}${pos.qty<0?' ⚠ oversold':''}</b></td>
+      <td class="num">${fmt(pos.avgRate)}</td>
+      <td class="num"><b>${fmt(pos.value)}</b></td>
+    </tr>`;
+  }).join("");
+  const totalValue = DB.stockItems.reduce((s,it)=>s+itemStockPosition(it.id).value,0);
+
+  const selectedItem = DB.stockItems.find(it=>it.id===stockLedgerItemId);
+  let ledgerHtml = "";
+  if(selectedItem){
+    let runQty = selectedItem.openingQty||0, runValue = runQty*(selectedItem.openingRate||0);
+    const moveRows = itemStockMovements(stockLedgerItemId).map(({item,voucher})=>{
+      const isInward = voucher.voucherType==="Purchase" || voucher.voucherType==="CreditNote";
+      let costed;
+      if(isInward){ runQty += item.qty; runValue += item.qty*item.rate; costed = item.rate; }
+      else { const avgRate = runQty>0 ? runValue/runQty : 0; runValue -= item.qty*avgRate; runQty -= item.qty; costed = avgRate; }
+      return `<tr>
+        <td>${voucher.date}</td><td>${voucherTypeLabel(voucher.voucherType)} ${voucher.voucherNo}</td>
+        <td class="num">${isInward?'+':'-'}${item.qty}</td>
+        <td class="num">${fmt(costed)}</td>
+        <td class="num">${round2(runQty)}</td>
+        <td class="num">${fmt(round2(runValue))}</td>
+      </tr>`;
+    }).join("");
+    ledgerHtml = `<div class="card"><h2>Stock Ledger - ${escapeHtml(selectedItem.name)}</h2>
+      <div class="sub">Every movement in date order, with the running quantity and value at each step (weighted-average cost).</div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Date</th><th>Voucher</th><th>Qty +/-</th><th>Rate Used</th><th>Balance Qty</th><th>Balance Value</th></tr></thead>
+        <tbody><tr><td colspan="2">Opening</td><td class="num">${selectedItem.openingQty||0}</td><td class="num">${fmt(selectedItem.openingRate||0)}</td><td class="num">${selectedItem.openingQty||0}</td><td class="num">${fmt((selectedItem.openingQty||0)*(selectedItem.openingRate||0))}</td></tr>
+        ${moveRows || `<tr><td colspan="6" class="empty">No movements yet.</td></tr>`}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  return `
+  <div class="card">
+    <h2>Stock Summary</h2>
+    <div class="sub">Quantity and weighted-average value on hand per item, derived from Opening Qty/Rate plus every Sales/Purchase/Credit Note/Debit Note since. Reporting only - doesn't post Cost of Goods Sold to the ledger, so it never changes your P&amp;L or Balance Sheet.</div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Item</th><th>Opening</th><th>Purchased</th><th>Sold</th><th>Returned In</th><th>Returned Out</th><th>Closing Qty</th><th>Avg Rate</th><th>Closing Value</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" class="empty">No stock items yet.</td></tr>`}</tbody>
+        <tfoot><tr><td colspan="8"><b>Total Stock Value</b></td><td class="num"><b>${fmt(round2(totalValue))}</b></td></tr></tfoot>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>View an Item's Stock Ledger</h2>
+    <div class="row"><select id="stockLedgerItemSelect" style="max-width:280px;">${DB.stockItems.map(it=>`<option value="${it.id}" ${it.id===stockLedgerItemId?'selected':''}>${escapeHtml(it.name)}</option>`).join("") || `<option value="">- no items -</option>`}</select></div>
+  </div>
+  ${ledgerHtml}`;
 }
 
 // ---- Bank Reconciliation ----
@@ -5197,10 +5315,22 @@ function attachHandlers(){
         if(!name){ toast("Enter an item name.", true); return; }
         const gstRate = parseFloat(val("item_gst"))||0;
         const defaultRate = parseFloat(val("item_rate"))||0;
+        const openingQty = parseFloat(val("item_openingQty"))||0;
+        const openingRate = parseFloat(val("item_openingRate"))||0;
         if(gstRate<0 || defaultRate<0){ toast("GST % and Default Rate cannot be negative.", true); return; }
-        const values = { name, hsnCode: val("item_hsn").trim(), unit: val("item_unit").trim(), gstRate, defaultRate };
+        if(openingQty<0 || openingRate<0){ toast("Opening Qty and Opening Rate cannot be negative.", true); return; }
+        const hasHistory = editingId && DB.voucherItems.some(vi=>vi.stockItemId===editingId);
+        if(hasHistory){
+          const existing = DB.stockItems.find(i=>i.id===editingId);
+          if(openingQty!==existing.openingQty || openingRate!==existing.openingRate){
+            toast("This item already has Sales/Purchase history — Opening Qty/Rate can't be changed anymore (it would silently rewrite past Stock Summary figures). Record an actual transaction instead.", true);
+            return;
+          }
+        }
+        const values = { name, hsnCode: val("item_hsn").trim(), unit: val("item_unit").trim(), gstRate, defaultRate, openingQty, openingRate };
         if(editingId){
-          const row = { name: values.name, hsn_code: values.hsnCode||null, unit: values.unit||null, gst_rate: values.gstRate, default_rate: values.defaultRate };
+          const row = { name: values.name, hsn_code: values.hsnCode||null, unit: values.unit||null, gst_rate: values.gstRate, default_rate: values.defaultRate,
+            opening_qty: values.openingQty, opening_rate: values.openingRate };
           const { error } = await sb.from("stock_items").update(row).eq("id", editingId);
           if(error){ toast("Could not update item: " + error.message, true); return; }
           const idx = DB.stockItems.findIndex(i=>i.id===editingId);
@@ -5209,7 +5339,8 @@ function attachHandlers(){
           itemEditingId = null;
         } else {
           const id = newId("ITM");
-          const row = { id, name: values.name, hsn_code: values.hsnCode||null, unit: values.unit||null, gst_rate: values.gstRate, default_rate: values.defaultRate };
+          const row = { id, name: values.name, hsn_code: values.hsnCode||null, unit: values.unit||null, gst_rate: values.gstRate, default_rate: values.defaultRate,
+            opening_qty: values.openingQty, opening_rate: values.openingRate };
           const { error } = await sb.from("stock_items").insert(row);
           if(error){ toast("Could not add item: " + error.message, true); return; }
           DB.stockItems.push({id, ...values});
@@ -5743,6 +5874,10 @@ function attachHandlers(){
     if(booksView==="parties"){
       const sel = document.getElementById("partySelect");
       if(sel) sel.onchange = ()=>{ booksPartyId = sel.value || null; renderAll(); };
+    }
+    if(booksView==="stock"){
+      const sel = document.getElementById("stockLedgerItemSelect");
+      if(sel) sel.onchange = ()=>{ stockLedgerItemId = sel.value || null; renderAll(); };
     }
     if(booksView==="gst"){
       document.getElementById("loadGstBtn").onclick = ()=>{ booksGstRange = {from:val("gst_from"), to:val("gst_to")}; renderAll(); };
