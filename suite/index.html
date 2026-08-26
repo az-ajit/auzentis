@@ -4202,10 +4202,22 @@ function renderMyProfile(){
           ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
         </div>
       </div>`;
+  const overviewField = (label, value) => `<div class="field"><label>${label}</label><div style="padding:7px 9px;font-size:13px;">${value||'<span class="helptext">-</span>'}</div></div>`;
   return `
   <div class="card">
     <h2>My Profile</h2>
     <div class="sub">Keep your own details up to date - HR uses this for payroll and records. Changes save straight to your employee record. Set your Date of Birth so we can wish you on your birthday!</div>
+    <div class="section-title">Overview</div>
+    <p class="helptext">These are set by HR - contact them if anything here needs correcting.</p>
+    <div class="grid grid-4">
+      ${overviewField('Emp ID', escapeHtml(emp.id))}
+      ${overviewField('Name', escapeHtml(emp.name))}
+      ${overviewField('Designation', escapeHtml(d.designation||''))}
+      ${overviewField('Department', escapeHtml(d.department||''))}
+      ${overviewField('Email', escapeHtml(emp.email||''))}
+      ${overviewField('Date of Joining', emp.doj)}
+      ${overviewField('Status', `<span class="pill ${emp.status==='Active'?'ok':'warn'}">${emp.status}</span>`)}
+    </div>
     <p class="helptext">For your security, PAN, Aadhar and Bank A/c No. are masked once saved. Click "Change" next to a field to clear and re-enter it.</p>
     <div class="section-title">Personal Details</div>
     <div class="grid grid-4">
