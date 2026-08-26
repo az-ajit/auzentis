@@ -3039,7 +3039,7 @@ function renderPartyLedgers(){
 
 // ---- Stock Summary (weighted-average valuation, reporting only) ----
 // Deliberately NOT integrated with accounting: Sales/Purchase vouchers post
-// to the ledger exactly as before (Sales/Purchase account, party, GST) —
+// to the ledger exactly as before (Sales/Purchase account, party, GST) -
 // this report is a separate read-only view computed from the same
 // voucher_items history, matching Tally's default (un-integrated)
 // inventory behavior. Only Sales/Purchase/Credit Note/Debit Note count;
@@ -3182,10 +3182,10 @@ function renderBankReconciliation(){
   return `
   <div class="card">
     <h2>Bank Reconciliation</h2>
-    <div class="sub">Tick off each transaction as it appears on your actual bank statement, with the date it cleared. Book Balance is everything recorded here; Reconciled Balance only counts what's ticked — that should match your statement once everything's cleared.</div>
+    <div class="sub">Tick off each transaction as it appears on your actual bank statement, with the date it cleared. Book Balance is everything recorded here; Reconciled Balance only counts what's ticked - that should match your statement once everything's cleared.</div>
     <div class="row">
       <div class="field" style="max-width:240px;"><label>Account</label>
-        <select id="reconcileAccountSelect">${cb.map(a=>`<option value="${a.id}" ${a.id===reconcileAccountId?'selected':''}>${a.name}</option>`).join("") || `<option value="">— no Cash/Bank accounts —</option>`}</select>
+        <select id="reconcileAccountSelect">${cb.map(a=>`<option value="${a.id}" ${a.id===reconcileAccountId?'selected':''}>${a.name}</option>`).join("") || `<option value="">- no Cash/Bank accounts -</option>`}</select>
       </div>
       <div class="field" style="max-width:180px;"><label>As of</label><input type="date" id="reconcileAsOf" value="${reconcileAsOf}"></div>
       <div class="field" style="max-width:200px;"><label>Statement Balance (₹)</label><input type="number" id="reconcileStatementBalance" value="${reconcileStatementBalance}"></div>
@@ -3196,7 +3196,7 @@ function renderBankReconciliation(){
       <div class="stat"><div class="lbl">Uncleared Total</div><div class="val">₹${fmt0(unclearedTotal)}</div></div>
       <div class="stat"><div class="lbl">Difference vs Statement</div><div class="val" style="color:${Math.abs(difference)<0.5?'var(--ok)':'var(--danger)'}">₹${fmt0(difference)}</div></div>
     </div>
-    <p class="helptext">${Math.abs(difference)<0.5 ? 'Matches your statement.' : "Doesn't match yet — tick off more cleared transactions, or check for a missing/incorrect entry."}</p>
+    <p class="helptext">${Math.abs(difference)<0.5 ? 'Matches your statement.' : "Doesn't match yet - tick off more cleared transactions, or check for a missing/incorrect entry."}</p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th>Debit</th><th>Credit</th><th>Cleared</th><th>Bank Date</th></tr></thead>
@@ -3217,34 +3217,36 @@ function voucherTaxSplitType(voucherId){
   return "legacy"; // pre-item-wise vouchers with a single flat GST% - no CGST/SGST/IGST split on file
 }
 
+// voucherType nets against reduceType (Credit Notes reduce Sales; Debit
+// Notes reduce Purchase) so the summary reflects actual net outward/inward
+// supply, the way a GSTR-1/3B working paper should. Shared by the Books
+// GST Summary view and the Reports tab's GST Summary export.
+function computeGstSummaryRows(voucherType, reduceType, from, to){
+  const rowsByKey = {};
+  DB.voucherItems.forEach(it=>{
+    const v = DB.vouchers.find(x=>x.id===it.voucherId);
+    if(!v || !dateInRange(v.date, from, to)) return;
+    const sign = v.voucherType===voucherType ? 1 : v.voucherType===reduceType ? -1 : 0;
+    if(sign===0) return;
+    const split = voucherTaxSplitType(v.id);
+    const key = (it.hsnCode||'-') + "|" + it.gstRate;
+    if(!rowsByKey[key]) rowsByKey[key] = {hsnCode:it.hsnCode||'-', gstRate:it.gstRate, qty:0, taxable:0, cgst:0, sgst:0, igst:0};
+    const r = rowsByKey[key];
+    r.qty += sign*(it.qty||0);
+    r.taxable += sign*(it.amount||0);
+    if(split==="inter") r.igst += sign*(it.gstAmount||0);
+    else if(split==="intra"){ r.cgst += sign*(it.gstAmount||0)/2; r.sgst += sign*(it.gstAmount||0)/2; }
+    // "legacy" vouchers contribute taxable value but no CGST/SGST/IGST split (none was recorded)
+  });
+  return Object.values(rowsByKey).sort((a,b)=>a.hsnCode.localeCompare(b.hsnCode));
+}
+
 let booksGstRange = null;
 function renderGstSummary(){
   if(!booksGstRange){ const r = quickRange("month"); booksGstRange = {from:r.from, to:r.to}; }
 
-  // voucherType nets against reduceType (Credit Notes reduce Sales; Debit
-  // Notes reduce Purchase) so the summary reflects actual net outward/inward
-  // supply, the way a GSTR-1/3B working paper should.
-  const summarize = (voucherType, reduceType)=>{
-    const rowsByKey = {};
-    DB.voucherItems.forEach(it=>{
-      const v = DB.vouchers.find(x=>x.id===it.voucherId);
-      if(!v || !dateInRange(v.date, booksGstRange.from, booksGstRange.to)) return;
-      const sign = v.voucherType===voucherType ? 1 : v.voucherType===reduceType ? -1 : 0;
-      if(sign===0) return;
-      const split = voucherTaxSplitType(v.id);
-      const key = (it.hsnCode||'-') + "|" + it.gstRate;
-      if(!rowsByKey[key]) rowsByKey[key] = {hsnCode:it.hsnCode||'-', gstRate:it.gstRate, qty:0, taxable:0, cgst:0, sgst:0, igst:0};
-      const r = rowsByKey[key];
-      r.qty += sign*(it.qty||0);
-      r.taxable += sign*(it.amount||0);
-      if(split==="inter") r.igst += sign*(it.gstAmount||0);
-      else if(split==="intra"){ r.cgst += sign*(it.gstAmount||0)/2; r.sgst += sign*(it.gstAmount||0)/2; }
-      // "legacy" vouchers contribute taxable value but no CGST/SGST/IGST split (none was recorded)
-    });
-    return Object.values(rowsByKey).sort((a,b)=>a.hsnCode.localeCompare(b.hsnCode));
-  };
-
-  const outward = summarize("Sales", "CreditNote"), inward = summarize("Purchase", "DebitNote");
+  const outward = computeGstSummaryRows("Sales", "CreditNote", booksGstRange.from, booksGstRange.to);
+  const inward = computeGstSummaryRows("Purchase", "DebitNote", booksGstRange.from, booksGstRange.to);
   const totalRow = rows => rows.reduce((a,r)=>({taxable:a.taxable+r.taxable,cgst:a.cgst+r.cgst,sgst:a.sgst+r.sgst,igst:a.igst+r.igst}), {taxable:0,cgst:0,sgst:0,igst:0});
   const table = (title, rows) => {
     const t = totalRow(rows);
@@ -4376,6 +4378,37 @@ const REPORT_DEFS = {
       return out;
     }
   },
+  voucherItems: {
+    label: "Books - Item-wise Detail", headers: ["Date","Voucher Type","Voucher No","Party","Item","HSN/SAC","Qty","Rate","Discount %","Taxable Amount","GST %","GST Amount","Line Total"],
+    dateNote: "Filtered by voucher date. One row per item line, across Sales/Purchase/Credit Note/Debit Note/Order/Note vouchers.",
+    rows(from,to){
+      return DB.voucherItems.map(it=>{
+        const v = DB.vouchers.find(x=>x.id===it.voucherId);
+        if(!v || !dateInRange(v.date, from, to)) return null;
+        return [v.date, voucherTypeLabel(v.voucherType), v.voucherNo, v.partyId?accName(v.partyId):'', it.description, it.hsnCode||'',
+          it.qty, round2(it.rate), it.discountPct||0, round2(it.amount), it.gstRate, round2(it.gstAmount), round2(it.amount+it.gstAmount)];
+      }).filter(Boolean).sort((a,b)=>a[0].localeCompare(b[0]));
+    }
+  },
+  gstSummary: {
+    label: "Books - GST Summary (HSN-wise)", headers: ["Type","HSN/SAC","GST %","Qty","Taxable Value","CGST","SGST","IGST"],
+    dateNote: "Filtered by voucher date. Working-paper level - not a filed-return export. Credit/Debit Notes net against Sales/Purchase.",
+    rows(from,to){
+      const outward = computeGstSummaryRows("Sales", "CreditNote", from, to).map(r=>["Outward (Sales)", r.hsnCode, r.gstRate, round2(r.qty), round2(r.taxable), round2(r.cgst), round2(r.sgst), round2(r.igst)]);
+      const inward = computeGstSummaryRows("Purchase", "DebitNote", from, to).map(r=>["Inward (Purchase)", r.hsnCode, r.gstRate, round2(r.qty), round2(r.taxable), round2(r.cgst), round2(r.sgst), round2(r.igst)]);
+      return [...outward, ...inward];
+    }
+  },
+  stockSummary: {
+    label: "Books - Stock Summary", headers: ["Item","HSN/SAC","Unit","Opening Qty","Purchased","Sold","Returned In","Returned Out","Closing Qty","Avg Rate","Closing Value"],
+    dateNote: "Not a period report - a snapshot of quantity/value as of the \"To\" date (\"From\" is ignored). Reporting only, doesn't reflect ledger postings.",
+    rows(from,to){
+      return DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(it=>{
+        const pos = itemStockPosition(it.id, to);
+        return [it.name, it.hsnCode||'', it.unit||'', it.openingQty||0, pos.purchasedQty, pos.soldQty, pos.returnedInQty, pos.returnedOutQty, pos.qty, pos.avgRate, pos.value];
+      });
+    }
+  },
   invoices: {
     label: "Invoices", headers: ["Date","Customer","Description","Amount","GST %","Total","Status"],
     dateNote: "Filtered by invoice date.",
@@ -5323,7 +5356,7 @@ function attachHandlers(){
         if(hasHistory){
           const existing = DB.stockItems.find(i=>i.id===editingId);
           if(openingQty!==existing.openingQty || openingRate!==existing.openingRate){
-            toast("This item already has Sales/Purchase history — Opening Qty/Rate can't be changed anymore (it would silently rewrite past Stock Summary figures). Record an actual transaction instead.", true);
+            toast("This item already has Sales/Purchase history - Opening Qty/Rate can't be changed anymore (it would silently rewrite past Stock Summary figures). Record an actual transaction instead.", true);
             return;
           }
         }
