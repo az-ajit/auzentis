@@ -677,6 +677,34 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
+// ============================= CLICK-TO-SORT TABLE HEADERS =============================
+// Generic sortable-column infrastructure, reused across every table that has one - each table
+// keys its sort state by a unique string, and passes a small `{colKey: compareFn}` map so this
+// file doesn't need bespoke sort logic scattered through every render function.
+const tableSortState = {};
+function sortRows(list, tableKey, comparators, defaultCol, defaultDir){
+  const s = tableSortState[tableKey] || (defaultCol ? {col:defaultCol, dir:defaultDir||"asc"} : null);
+  if(!s || !comparators[s.col]) return list;
+  const sorted = list.slice().sort(comparators[s.col]);
+  return s.dir==="desc" ? sorted.reverse() : sorted;
+}
+function sortHeader(tableKey, col, label, extraStyle){
+  const s = tableSortState[tableKey];
+  const active = s && s.col===col;
+  const arrow = active ? (s.dir==="asc"?" ▲":" ▼") : "";
+  return `<th class="sortableHeader" data-table="${tableKey}" data-col="${col}" style="cursor:pointer;user-select:none;${extraStyle||''}">${label}${arrow}</th>`;
+}
+function wireSortableHeaders(){
+  document.querySelectorAll(".sortableHeader").forEach(th=>th.onclick=()=>{
+    const key = th.dataset.table, col = th.dataset.col;
+    const cur = tableSortState[key];
+    tableSortState[key] = (cur && cur.col===col) ? {col, dir: cur.dir==="asc"?"desc":"asc"} : {col, dir:"asc"};
+    renderAll();
+  });
+}
+const strCmp = (get) => (a,b) => String(get(a)||"").localeCompare(String(get(b)||""));
+const numCmp = (get) => (a,b) => (Number(get(a))||0) - (Number(get(b))||0);
+
 // Employees' PAN/Aadhar/Bank Account No are only ever shown unmasked to Director/Admin -
 // everyone else (including HR, who can otherwise edit the Employee form) sees the last 4
 // characters only, and cannot overwrite a value they can't see.
@@ -1599,6 +1627,11 @@ let employeeSearch = "";
 let employeeStatusFilter = "Active"; // hide inactive/resigned employees from the default view
 let selectedEmployeeIds = new Set();
 
+const EMP_SORT_COMPARATORS = {
+  id: strCmp(e=>e.id), name: strCmp(e=>e.name),
+  designation: strCmp(e=>e.details&&e.details.designation), department: strCmp(e=>e.details&&e.details.department),
+  status: strCmp(e=>e.status),
+};
 function renderEmployees(){
   let filtered = DB.employees.slice().sort((a,b)=>a.id.localeCompare(b.id));
   if(employeeStatusFilter) filtered = filtered.filter(e=>e.status===employeeStatusFilter);
@@ -1606,6 +1639,7 @@ function renderEmployees(){
     const q = employeeSearch.trim().toLowerCase();
     filtered = filtered.filter(e=>[e.id,e.name,e.email].some(v=>v && v.toLowerCase().includes(q)));
   }
+  filtered = sortRows(filtered, "employees", EMP_SORT_COMPARATORS);
   const { pageItems, page, totalPages, total } = paginate(filtered, "employees", 20);
   const rows = pageItems.map(e=>{
     const struct = currentStructureFor(e.id);
@@ -1619,7 +1653,7 @@ function renderEmployees(){
       <td>${e.id}</td>
       <td>${e.name}</td>
       <td>${(e.details&&e.details.designation)||'-'}</td>
-      <td class="hide-tablet">${(e.details&&e.details.department)||'-'}</td>
+      <td>${(e.details&&e.details.department)||'-'}</td>
       <td><span class="pill ${e.status==='Active'?'ok':'warn'}">${e.status}</span>${e.isRemote?' <span class="pill ok">WFH</span>':''}
         ${ob.total ? `<span class="pill ${ob.complete?'ok':'warn'}" title="Onboarding checklist">${ob.done}/${ob.total}</span>` : ''}</td>
       <td class="actions">
@@ -1646,7 +1680,7 @@ function renderEmployees(){
     ${selectedEmployeeIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedEmployeeIds.size} selected</span><button class="btn danger sm" id="bulkDeleteEmpBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th><input type="checkbox" id="empCheckAll"></th><th>Emp ID</th><th>Name</th><th>Designation</th><th class="hide-tablet">Department</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="empCheckAll"></th>${sortHeader("employees","id","Emp ID")}${sortHeader("employees","name","Name")}${sortHeader("employees","designation","Designation")}${sortHeader("employees","department","Department")}${sortHeader("employees","status","Status")}<th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="7" class="empty">No employees match.</td></tr>`}</tbody>
       </table>
     </div>
@@ -2706,6 +2740,11 @@ let voucherType = "Sales";
 let journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
 let booksDayRange = null;
 let booksDayBookOpen = false;
+let dayBookSearch = "";
+const DAY_BOOK_SORT_COMPARATORS = {
+  date: strCmp(x=>x.v.date), voucherNo: strCmp(x=>x.v.voucherNo), type: strCmp(x=>x.v.voucherType),
+  party: strCmp(x=>x.partyName), amount: numCmp(x=>x.total),
+};
 let booksCsvImportOpen = false;
 let booksAsOf = null;
 let booksPnlRange = null;
@@ -2783,9 +2822,19 @@ function renderBooks(){
 
 // ---- Stock Items (item master for item-wise invoicing - no stock-on-hand/valuation tracking) ----
 let itemEditingId = null;
+let itemSearch = "";
+const ITEM_SORT_COMPARATORS = {
+  name: strCmp(i=>i.name), hsn: strCmp(i=>i.hsnCode), unit: strCmp(i=>i.unit),
+  gst: numCmp(i=>i.gstRate), rate: numCmp(i=>i.defaultRate), stock: numCmp(i=>itemStockPosition(i.id).qty),
+};
 function renderStockItems(){
-  const sorted = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name));
-  const { pageItems, page, totalPages, total } = paginate(sorted, "stockItems", 20);
+  let filtered = DB.stockItems.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  if(itemSearch.trim()){
+    const q = itemSearch.trim().toLowerCase();
+    filtered = filtered.filter(i=>[i.name,i.hsnCode,i.unit].some(v=>v && v.toLowerCase().includes(q)));
+  }
+  filtered = sortRows(filtered, "stockItems", ITEM_SORT_COMPARATORS);
+  const { pageItems, page, totalPages, total } = paginate(filtered, "stockItems", 20);
   const rows = pageItems.map(i=>{
     const stk = itemStockPosition(i.id);
     return `
@@ -2803,10 +2852,11 @@ function renderStockItems(){
   <div class="card">
     <h2>Stock Items</h2>
     <div class="sub">Items/services you invoice against - used for item-wise Sales/Purchase vouchers (qty, rate, HSN, GST % per line). Opening Qty/Rate seed the Stock Summary report (Books → Stock Summary), which tracks quantity and weighted-average value from your Sales/Purchase/Credit/Debit Note history.</div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="itemSearchInput" placeholder="Search by name, HSN, or unit…" value="${escapeHtml(itemSearch)}"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Name</th><th>HSN/SAC Code</th><th>Unit</th><th>GST %</th><th>Default Rate (₹)</th><th>Stock on Hand</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7" class="empty">No items yet.</td></tr>`}</tbody>
+        <thead><tr>${sortHeader("stockItems","name","Name")}${sortHeader("stockItems","hsn","HSN/SAC Code")}${sortHeader("stockItems","unit","Unit")}${sortHeader("stockItems","gst","GST %")}${sortHeader("stockItems","rate","Default Rate (₹)")}${sortHeader("stockItems","stock","Stock on Hand")}<th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No items match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("stockItems", page, totalPages, total)}
@@ -2834,12 +2884,17 @@ let accEditingId = null;
 let accFormDetailsOpen = false;
 let accSearch = "";
 let openingBillsDraft = []; // [{id,date,reference,amount}] - draft for the Opening Bills section, synced from the account being edited by editAccBtn
+const ACC_SORT_COMPARATORS = {
+  name: strCmp(a=>a.name), group: strCmp(a=>a.accGroup), nature: strCmp(a=>a.nature),
+  balance: numCmp(a=>accountBalance(a.id)),
+};
 function renderChartOfAccounts(){
   let sorted = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name));
   if(accSearch.trim()){
     const q = accSearch.trim().toLowerCase();
     sorted = sorted.filter(a=>[a.name,a.accGroup,a.nature,a.partyType].some(v=>v && v.toLowerCase().includes(q)));
   }
+  sorted = sortRows(sorted, "chartOfAccounts", ACC_SORT_COMPARATORS);
   const { pageItems, page, totalPages, total } = paginate(sorted, "chartOfAccounts", 20);
   const rows = pageItems.map(a=>`
     <tr data-id="${a.id}">
@@ -2862,7 +2917,7 @@ function renderChartOfAccounts(){
     <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="accSearchInput" placeholder="Search by name, group, or nature…" value="${escapeHtml(accSearch)}"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Name</th><th>Group</th><th>Nature</th><th>Party Type</th><th>Current Balance</th><th></th></tr></thead>
+        <thead><tr>${sortHeader("chartOfAccounts","name","Name")}${sortHeader("chartOfAccounts","group","Group")}${sortHeader("chartOfAccounts","nature","Nature")}<th>Party Type</th>${sortHeader("chartOfAccounts","balance","Current Balance")}<th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="6" class="empty">No accounts match.</td></tr>`}</tbody>
       </table>
     </div>
@@ -2957,20 +3012,27 @@ function renderVouchersView(){
   else if(NON_ACCOUNTING_VOUCHER_TYPES.includes(voucherType)) form = voucherFormOrderNote(voucherType);
   else form = voucherFormJournal();
 
-  const dayBookVouchers = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to))
-    .sort((a,b)=>b.date.localeCompare(a.date));
+  let dayBookVouchers = DB.vouchers.filter(v=>dateInRange(v.date, booksDayRange.from, booksDayRange.to)).map(v=>{
+    const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
+    const items = DB.voucherItems.filter(i=>i.voucherId===v.id);
+    const isNonAcct = NON_ACCOUNTING_VOUCHER_TYPES.includes(v.voucherType);
+    const total = isNonAcct ? items.reduce((a,i)=>a+(i.amount||0)+(i.gstAmount||0),0) : lines.reduce((a,l)=>a+(l.debit||0),0);
+    const partyName = v.partyId ? accName(v.partyId) : "";
+    return {v, items, isNonAcct, total, partyName};
+  });
+  if(dayBookSearch.trim()){
+    const q = dayBookSearch.trim().toLowerCase();
+    dayBookVouchers = dayBookVouchers.filter(({v,partyName})=>[v.voucherNo,partyName,v.narration].some(s=>s && s.toLowerCase().includes(q)));
+  }
+  dayBookVouchers = sortRows(dayBookVouchers, "dayBook", DAY_BOOK_SORT_COMPARATORS, "date", "desc");
   const { pageItems: dayBookPage, page: dayBookPageNum, totalPages: dayBookTotalPages, total: dayBookTotal } = paginate(dayBookVouchers, "dayBook", 25);
-  const dayRows = dayBookPage.map(v=>{
-      const lines = DB.voucherLines.filter(l=>l.voucherId===v.id);
-      const items = DB.voucherItems.filter(i=>i.voucherId===v.id);
-      const isNonAcct = NON_ACCOUNTING_VOUCHER_TYPES.includes(v.voucherType);
-      const total = isNonAcct ? items.reduce((a,i)=>a+(i.amount||0)+(i.gstAmount||0),0) : lines.reduce((a,l)=>a+(l.debit||0),0);
+  const dayRows = dayBookPage.map(({v,items,isNonAcct,total,partyName})=>{
       const itemsTitle = items.length ? items.map(i=>`${i.description} - ${i.qty} x ₹${fmt0(i.rate)} (${i.gstRate}% GST) = ₹${fmt0(i.amount+i.gstAmount)}`).join("\n") : "";
       const canConvert = isNonAcct && items.length && v.partyId;
       return `<tr data-id="${v.id}">
         <td>${v.date}</td><td>${v.voucherNo}</td>
         <td>${voucherTypeLabel(v.voucherType)}${isNonAcct?' <span class="helptext">(non-accounting)</span>':''}</td>
-        <td>${v.partyId?accName(v.partyId):''}</td>
+        <td>${partyName}</td>
         <td${itemsTitle?` title="${escapeHtml(itemsTitle)}"`:''}>${v.narration||''}${items.length?` <span class="helptext">(${items.length} item${items.length>1?'s':''} - hover for details)</span>`:''}</td>
         <td class="num">${fmt(total)}</td>
         <td class="actions">
@@ -2999,10 +3061,11 @@ function renderVouchersView(){
       <button class="btn ghost" id="loadDayBookBtn">Apply</button>
       <button class="btn gold" id="exportDayBookBtn">Export CSV</button>
     </div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="dayBookSearchInput" placeholder="Search by voucher no, party, or narration…" value="${escapeHtml(dayBookSearch)}"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Narration</th><th>Amount</th><th></th></tr></thead>
-        <tbody>${dayRows || `<tr><td colspan="7" class="empty">No vouchers in this range.</td></tr>`}</tbody>
+        <thead><tr>${sortHeader("dayBook","date","Date")}${sortHeader("dayBook","voucherNo","Voucher No")}${sortHeader("dayBook","type","Type")}${sortHeader("dayBook","party","Party")}<th>Narration</th>${sortHeader("dayBook","amount","Amount")}<th></th></tr></thead>
+        <tbody>${dayRows || `<tr><td colspan="7" class="empty">No vouchers match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("dayBook", dayBookPageNum, dayBookTotalPages, dayBookTotal)}
@@ -3420,8 +3483,24 @@ function voucherFormJournal(){
 }
 
 // ---- Party Ledgers ----
+let partyDebtorSearch = "";
+let partyCreditorSearch = "";
+const PARTY_SORT_COMPARATORS = {
+  name: strCmp(p=>p.name), balance: numCmp(p=>accountBalance(p.id)),
+};
 function renderPartyLedgers(){
-  const debtors = parties("Debtor"), creditors = parties("Creditor");
+  const allDebtors = parties("Debtor"), allCreditors = parties("Creditor");
+  let debtors = allDebtors, creditors = allCreditors;
+  if(partyDebtorSearch.trim()){
+    const q = partyDebtorSearch.trim().toLowerCase();
+    debtors = debtors.filter(p=>p.name.toLowerCase().includes(q));
+  }
+  if(partyCreditorSearch.trim()){
+    const q = partyCreditorSearch.trim().toLowerCase();
+    creditors = creditors.filter(p=>p.name.toLowerCase().includes(q));
+  }
+  debtors = sortRows(debtors, "partyDebtors", PARTY_SORT_COMPARATORS);
+  creditors = sortRows(creditors, "partyCreditors", PARTY_SORT_COMPARATORS);
   const partyRow = p => {
     const bal = accountBalance(p.id);
     const age = ageParty(p.id);
@@ -3429,7 +3508,7 @@ function renderPartyLedgers(){
       <td class="num">${fmt(age.buckets[0])}</td><td class="num">${fmt(age.buckets[1])}</td>
       <td class="num">${fmt(age.buckets[2])}</td><td class="num">${fmt(age.buckets[3])}</td></tr>`;
   };
-  const partyOptions = [...debtors,...creditors].map(p=>`<option value="${p.id}" ${p.id===booksPartyId?'selected':''}>${p.name}</option>`).join("");
+  const partyOptions = [...allDebtors,...allCreditors].map(p=>`<option value="${p.id}" ${p.id===booksPartyId?'selected':''}>${p.name}</option>`).join("");
 
   let detail = "";
   if(booksPartyId){
@@ -3467,15 +3546,17 @@ function renderPartyLedgers(){
   <div class="card">
     <h2>Sundry Debtors (Customers who owe you)</h2>
     <div class="sub">Every account marked as a Debtor in Chart of Accounts. Balance is what they currently owe; the four columns split that by how long it's been outstanding (aging), so you can spot overdue customers at a glance.</div>
-    <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${debtorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers yet - add one in Chart of Accounts and mark it as a Debtor.</td></tr>`}</tbody></table></div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="partyDebtorSearchInput" placeholder="Search by name…" value="${escapeHtml(partyDebtorSearch)}"></div></div>
+    <div class="tablewrap"><table><thead><tr>${sortHeader("partyDebtors","name","Name")}${sortHeader("partyDebtors","balance","Balance")}<th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
+    <tbody>${debtorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No customers match.</td></tr>`}</tbody></table></div>
     ${renderPager("partyDebtors", debtorsPageNum, debtorsTotalPages, debtorsTotal)}
   </div>
   <div class="card">
     <h2>Sundry Creditors (Vendors you owe)</h2>
     <div class="sub">Every account marked as a Creditor in Chart of Accounts, with the same aging breakdown for what you owe them.</div>
-    <div class="tablewrap"><table><thead><tr><th>Name</th><th>Balance</th><th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
-    <tbody>${creditorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors yet - add one in Chart of Accounts and mark it as a Creditor.</td></tr>`}</tbody></table></div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="partyCreditorSearchInput" placeholder="Search by name…" value="${escapeHtml(partyCreditorSearch)}"></div></div>
+    <div class="tablewrap"><table><thead><tr>${sortHeader("partyCreditors","name","Name")}${sortHeader("partyCreditors","balance","Balance")}<th>0-30 days</th><th>31-60</th><th>61-90</th><th>90+</th></tr></thead>
+    <tbody>${creditorsPage.map(partyRow).join("") || `<tr><td colspan="6" class="empty">No vendors match.</td></tr>`}</tbody></table></div>
     ${renderPager("partyCreditors", creditorsPageNum, creditorsTotalPages, creditorsTotal)}
   </div>
   <div class="card">
@@ -3598,6 +3679,11 @@ function renderStockSummary(){
 let reconcileAccountId = null;
 let reconcileStatementBalance = 0;
 let reconcileAsOf = null;
+let reconcileSearch = "";
+const RECONCILE_SORT_COMPARATORS = {
+  date: strCmp(x=>x.voucher.date), voucher: strCmp(x=>x.voucher.voucherNo),
+  debit: numCmp(x=>x.line.debit), credit: numCmp(x=>x.line.credit),
+};
 
 function renderBankReconciliation(){
   const cb = cashBankAccounts();
@@ -3619,7 +3705,13 @@ function renderBankReconciliation(){
   const difference = round2(reconcileStatementBalance - reconciledBalance);
   const unclearedTotal = round2(rowsData.filter(x=>!x.line.bankReconciled).reduce((s,x)=>s + sign*((x.line.debit||0)-(x.line.credit||0)), 0));
 
-  const { pageItems: reconcilePage, page: reconcilePageNum, totalPages: reconcileTotalPages, total: reconcileTotal } = paginate(rowsData, "bankReconcile", 25);
+  let filteredRowsData = rowsData;
+  if(reconcileSearch.trim()){
+    const q = reconcileSearch.trim().toLowerCase();
+    filteredRowsData = filteredRowsData.filter(({line,voucher})=>[voucher.voucherNo, voucher.narration, line.lineNarration].some(s=>s && s.toLowerCase().includes(q)));
+  }
+  filteredRowsData = sortRows(filteredRowsData, "bankReconcile", RECONCILE_SORT_COMPARATORS, "date", "asc");
+  const { pageItems: reconcilePage, page: reconcilePageNum, totalPages: reconcileTotalPages, total: reconcileTotal } = paginate(filteredRowsData, "bankReconcile", 25);
   const rows = reconcilePage.map(({line,voucher})=>`
     <tr>
       <td>${voucher.date}</td><td>${voucherTypeLabel(voucher.voucherType)} ${voucher.voucherNo}</td>
@@ -3647,10 +3739,11 @@ function renderBankReconciliation(){
       <div class="stat"><div class="lbl">Difference vs Statement</div><div class="val" style="color:${Math.abs(difference)<0.5?'var(--ok)':'var(--danger)'}">₹${fmt0(difference)}</div></div>
     </div>
     <p class="helptext">${Math.abs(difference)<0.5 ? 'Matches your statement.' : "Doesn't match yet - tick off more cleared transactions, or check for a missing/incorrect entry."}</p>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="reconcileSearchInput" placeholder="Search by voucher no or particulars…" value="${escapeHtml(reconcileSearch)}"></div></div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th>Debit</th><th>Credit</th><th>Cleared</th><th>Bank Date</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions for this account.</td></tr>`}</tbody>
+        <thead><tr>${sortHeader("bankReconcile","date","Date")}${sortHeader("bankReconcile","voucher","Voucher")}<th>Particulars</th>${sortHeader("bankReconcile","debit","Debit")}${sortHeader("bankReconcile","credit","Credit")}<th>Cleared</th><th>Bank Date</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="empty">No transactions match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("bankReconcile", reconcilePageNum, reconcileTotalPages, reconcileTotal)}
@@ -4757,6 +4850,10 @@ function renderLeaves(){
 
 // ============================= CRM =============================
 let leadSearch = "";
+const LEADS_SORT_COMPARATORS = {
+  name: strCmp(l=>l.name), company: strCmp(l=>l.company), contact: strCmp(l=>l.contact),
+  value: numCmp(l=>l.value), stage: strCmp(l=>l.stage), nextFollowUp: strCmp(l=>l.nextFollowUp),
+};
 let leadStageFilter = "";
 let selectedLeadIds = new Set();
 
@@ -4778,6 +4875,7 @@ function renderCRM(){
     const q = leadSearch.trim().toLowerCase();
     sortedLeads = sortedLeads.filter(l=>[l.name,l.company,l.contact,l.notes].some(v=>v && v.toLowerCase().includes(q)));
   }
+  sortedLeads = sortRows(sortedLeads, "leads", LEADS_SORT_COMPARATORS);
   const { pageItems: leadsPage, page: ldPage, totalPages: ldTotalPages, total: ldTotal } = paginate(sortedLeads, "leads", 20);
   const rows = leadsPage.map(l=>`
     <tr data-id="${l.id}">
@@ -4817,7 +4915,7 @@ function renderCRM(){
     ${selectedLeadIds.size ? `<div class="bulk-actions"><span class="helptext">${selectedLeadIds.size} selected</span><button class="btn danger sm" id="bulkDeleteLeadBtn">Delete Selected</button></div>` : ''}
     <div class="tablewrap">
       <table>
-        <thead><tr><th><input type="checkbox" id="leadCheckAll"></th><th>Name</th><th>Company</th><th>Contact</th><th>Value (₹)</th><th>Stage</th><th>Next Follow-up</th><th>Notes</th><th></th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="leadCheckAll"></th>${sortHeader("leads","name","Name")}${sortHeader("leads","company","Company")}${sortHeader("leads","contact","Contact")}${sortHeader("leads","value","Value (₹)")}${sortHeader("leads","stage","Stage")}${sortHeader("leads","nextFollowUp","Next Follow-up")}<th>Notes</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="9" class="empty">No leads match.</td></tr>`}</tbody>
       </table>
     </div>
@@ -5328,6 +5426,7 @@ function attachHandlers(){
     paginationState[key] = b.dataset.dir === "prev" ? Math.max(1, cur-1) : cur+1;
     renderAll();
   });
+  wireSortableHeaders();
 
   if(activeTab==="Settings"){
     document.getElementById("saveSettingsBtn").onclick = async ()=>{
@@ -6118,6 +6217,14 @@ function attachHandlers(){
     document.querySelectorAll(".booksNavBtn").forEach(b=>b.onclick=()=>{ booksView = b.dataset.view; renderAll(); });
 
     if(booksView==="items"){
+      document.getElementById("itemSearchInput").oninput = (e)=>{
+        itemSearch = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        paginationState["stockItems"] = 1;
+        renderAll();
+        const newInput = document.getElementById("itemSearchInput");
+        if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+      };
       document.getElementById("saveItemBtn").onclick = async ()=>{
         const editingId = val("itemEditingId");
         const name = val("item_name").trim();
@@ -6298,6 +6405,16 @@ function attachHandlers(){
       if(dayBookDetails) dayBookDetails.ontoggle = ()=>{ booksDayBookOpen = dayBookDetails.open; };
       const csvImportDetails = document.getElementById("csvImportDetails");
       if(csvImportDetails) csvImportDetails.ontoggle = ()=>{ booksCsvImportOpen = csvImportDetails.open; };
+      const dayBookSearchInput = document.getElementById("dayBookSearchInput");
+      if(dayBookSearchInput) dayBookSearchInput.oninput = (e)=>{
+        dayBookSearch = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        paginationState["dayBook"] = 1;
+        booksDayBookOpen = true;
+        renderAll();
+        const newInput = document.getElementById("dayBookSearchInput");
+        if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+      };
       document.getElementById("loadDayBookBtn").onclick = ()=>{
         booksDayRange = {from: val("db_from"), to: val("db_to")}; booksDayBookOpen = true; renderAll();
       };
@@ -6707,6 +6824,24 @@ function attachHandlers(){
     if(booksView==="parties"){
       const sel = document.getElementById("partySelect");
       if(sel) sel.onchange = ()=>{ booksPartyId = sel.value || null; renderAll(); };
+      const debtorSearchInput = document.getElementById("partyDebtorSearchInput");
+      if(debtorSearchInput) debtorSearchInput.oninput = (e)=>{
+        partyDebtorSearch = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        paginationState["partyDebtors"] = 1;
+        renderAll();
+        const newInput = document.getElementById("partyDebtorSearchInput");
+        if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+      };
+      const creditorSearchInput = document.getElementById("partyCreditorSearchInput");
+      if(creditorSearchInput) creditorSearchInput.oninput = (e)=>{
+        partyCreditorSearch = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        paginationState["partyCreditors"] = 1;
+        renderAll();
+        const newInput = document.getElementById("partyCreditorSearchInput");
+        if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+      };
     }
     if(booksView==="stock"){
       const sel = document.getElementById("stockLedgerItemSelect");
@@ -6722,6 +6857,15 @@ function attachHandlers(){
       if(asOfInp) asOfInp.onchange = (e)=>{ reconcileAsOf = e.target.value; renderAll(); };
       const stmtInp = document.getElementById("reconcileStatementBalance");
       if(stmtInp) stmtInp.oninput = ()=>{ reconcileStatementBalance = parseFloat(stmtInp.value)||0; };
+      const reconcileSearchInput = document.getElementById("reconcileSearchInput");
+      if(reconcileSearchInput) reconcileSearchInput.oninput = (e)=>{
+        reconcileSearch = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        paginationState["bankReconcile"] = 1;
+        renderAll();
+        const newInput = document.getElementById("reconcileSearchInput");
+        if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+      };
       document.querySelectorAll(".reconcileCheck").forEach(cb=>cb.onchange=async ()=>{
         const lineId = cb.dataset.line;
         const line = DB.voucherLines.find(l=>l.id===lineId);
