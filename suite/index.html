@@ -2832,9 +2832,14 @@ function renderStockItems(){
 // ---- Chart of Accounts ----
 let accEditingId = null;
 let accFormDetailsOpen = false;
+let accSearch = "";
 let openingBillsDraft = []; // [{id,date,reference,amount}] - draft for the Opening Bills section, synced from the account being edited by editAccBtn
 function renderChartOfAccounts(){
-  const sorted = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name));
+  let sorted = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name));
+  if(accSearch.trim()){
+    const q = accSearch.trim().toLowerCase();
+    sorted = sorted.filter(a=>[a.name,a.accGroup,a.nature,a.partyType].some(v=>v && v.toLowerCase().includes(q)));
+  }
   const { pageItems, page, totalPages, total } = paginate(sorted, "chartOfAccounts", 20);
   const rows = pageItems.map(a=>`
     <tr data-id="${a.id}">
@@ -2854,10 +2859,11 @@ function renderChartOfAccounts(){
   <div class="card">
     <h2>Chart of Accounts</h2>
     <div class="sub">Every ledger account in your books. System accounts (Cash, Bank, Sales, statutory payables) can't be deleted since Payroll and core vouchers depend on them.</div>
+    <div class="table-toolbar"><div class="field search-field" style="margin:0;"><input type="text" id="accSearchInput" placeholder="Search by name, group, or nature…" value="${escapeHtml(accSearch)}"></div></div>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Name</th><th>Group</th><th>Nature</th><th>Party Type</th><th>Current Balance</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6" class="empty">No accounts yet.</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="6" class="empty">No accounts match.</td></tr>`}</tbody>
       </table>
     </div>
     ${renderPager("chartOfAccounts", page, totalPages, total)}
@@ -6175,6 +6181,14 @@ function attachHandlers(){
     if(booksView==="accounts"){
       const accFormDetails = document.getElementById("accFormDetails");
       if(accFormDetails) accFormDetails.ontoggle = ()=>{ accFormDetailsOpen = accFormDetails.open; };
+      document.getElementById("accSearchInput").oninput = (e)=>{
+        accSearch = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        paginationState["chartOfAccounts"] = 1;
+        renderAll();
+        const newInput = document.getElementById("accSearchInput");
+        if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+      };
       document.getElementById("addAccBtn").onclick = async ()=>{
         const editingId = val("accEditingId");
         const name = val("acc_name").trim();
