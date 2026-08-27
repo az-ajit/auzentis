@@ -2579,7 +2579,7 @@ function startEditVoucher(id){
     voucherAmountDraft = toLine ? toLine.debit : 0;
   } else if(v.voucherType==="Journal"){
     journalRows = lines.map(l=>({account:l.accountId, debit:l.debit||0, credit:l.credit||0}));
-    if(journalRows.length<2) journalRows.push({account:"", debit:0, credit:0});
+    if(journalRows.length<2) journalRows.push({account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0});
   }
 }
 
@@ -3193,7 +3193,7 @@ function resetVoucherFormState(){
   voucherLedgerAcctId = null; voucherCashBankId = null;
   voucherContraFrom = null; voucherContraTo = null;
   voucherAmountDraft = 0; voucherEditTds = 0;
-  journalRows = [{account:"", debit:0, credit:0}, {account:"", debit:0, credit:0}];
+  journalRows = [{account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0}, {account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0}];
 }
 
 function voucherItemRowAmount(r){ return round2((r.qty||0) * (r.rate||0) * (1 - (r.discountPct||0)/100)); }
@@ -6657,15 +6657,29 @@ function attachHandlers(){
       }
 
       if(voucherType==="Journal"){
+        // Patches just the Total/Balanced footer in place, without a full renderAll() - so
+        // typing a Debit/Credit amount doesn't steal focus out of the input on every keystroke,
+        // while still keeping the live total accurate (it used to just sit stale until you did
+        // something else that happened to trigger a re-render).
+        const updateJournalTotals = ()=>{
+          const totalDr = journalRows.reduce((a,r)=>a+(parseFloat(r.debit)||0),0);
+          const totalCr = journalRows.reduce((a,r)=>a+(parseFloat(r.credit)||0),0);
+          const foot = document.querySelector("#main tfoot");
+          if(!foot) return;
+          const cells = foot.querySelectorAll("td");
+          if(cells[1]) cells[1].innerHTML = `<b>${fmt(totalDr)}</b>`;
+          if(cells[2]) cells[2].innerHTML = `<b>${fmt(totalCr)}</b>`;
+          if(cells[3]) cells[3].innerHTML = Math.abs(totalDr-totalCr)<0.01 ? '<span class="pill ok">Balanced</span>' : '<span class="pill warn">Not Balanced</span>';
+        };
         document.getElementById("jrAddRowBtn").onclick = ()=>{ journalRows.push({account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0}); renderAll(); };
         document.querySelectorAll(".jrRemoveBtn").forEach(b=>b.onclick=()=>{
           journalRows.splice(parseInt(b.dataset.i), 1);
-          if(journalRows.length<2) journalRows.push({account:"", debit:0, credit:0});
+          if(journalRows.length<2) journalRows.push({account:DB.ledgerAccounts[0]?.id||"", debit:0, credit:0});
           renderAll();
         });
         document.querySelectorAll(".jrAccount").forEach(sel=>sel.onchange=()=>{ journalRows[parseInt(sel.dataset.i)].account = sel.value; });
-        document.querySelectorAll(".jrDebit").forEach(inp=>inp.oninput=()=>{ journalRows[parseInt(inp.dataset.i)].debit = parseFloat(inp.value)||0; });
-        document.querySelectorAll(".jrCredit").forEach(inp=>inp.oninput=()=>{ journalRows[parseInt(inp.dataset.i)].credit = parseFloat(inp.value)||0; });
+        document.querySelectorAll(".jrDebit").forEach(inp=>inp.oninput=()=>{ journalRows[parseInt(inp.dataset.i)].debit = parseFloat(inp.value)||0; updateJournalTotals(); });
+        document.querySelectorAll(".jrCredit").forEach(inp=>inp.oninput=()=>{ journalRows[parseInt(inp.dataset.i)].credit = parseFloat(inp.value)||0; updateJournalTotals(); });
       }
 
       const saveBtn = document.getElementById("saveVoucherBtn");
