@@ -2881,6 +2881,7 @@ function renderStockItems(){
 
 // ---- Chart of Accounts ----
 let accEditingId = null;
+let accViewingId = null;
 let accFormDetailsOpen = false;
 let accSearch = "";
 let openingBillsDraft = []; // [{id,date,reference,amount}] - draft for the Opening Bills section, synced from the account being edited by editAccBtn
@@ -2888,6 +2889,52 @@ const ACC_SORT_COMPARATORS = {
   name: strCmp(a=>a.name), group: strCmp(a=>a.accGroup), nature: strCmp(a=>a.nature),
   balance: numCmp(a=>accountBalance(a.id)),
 };
+// Read-only view of an account's full details (PAN, address, bank, etc.) - separate from the
+// Add/Edit form, since Edit means "I'm about to change this," and looking something up
+// shouldn't put you one careless keystroke away from altering a live ledger account.
+function renderAccountViewCard(){
+  if(!accViewingId) return "";
+  const a = DB.ledgerAccounts.find(x=>x.id===accViewingId);
+  if(!a){ accViewingId = null; return ""; }
+  const d = a.details || {};
+  const row = (label, value) => `<div class="field"><label>${label}</label><div style="padding:7px 9px;font-size:13px;">${value?escapeHtml(String(value)):'<span class="helptext">-</span>'}</div></div>`;
+  const openingBills = d.openingBills || [];
+  return `
+  <div class="card" id="accViewCard">
+    <h2>Account Details - ${escapeHtml(a.name)}</h2>
+    <div class="sub">Read-only. Click Edit to change any of this.</div>
+    <div class="section-title">Overview</div>
+    <div class="grid grid-4">
+      ${row('Name', a.name)}${row('Alias', d.alias)}${row('Group', a.accGroup)}${row('Nature', a.nature)}
+      ${row('Party Type', a.isParty ? (a.partyType||'Party') : 'Not a party')}
+      ${row('Opening Balance', `₹${fmt(a.openingBalance||0)} ${a.openingBalanceType||'Dr'}`)}
+      ${row('Current Balance', `₹${fmt(accountBalance(a.id))} ${a.nature==="Asset"||a.nature==="Expense"?'Dr':'Cr'}`)}
+    </div>
+    <div class="section-title">Mailing Details</div>
+    <div class="grid grid-4">
+      ${row('Mailing Name', d.mailingName)}${row('Address', d.address)}${row('State', d.state)}
+      ${row('Country', d.country)}${row('Pincode', d.pincode)}${row('Mobile No.', d.mobile)}
+    </div>
+    <div class="section-title">Tax Registration Details</div>
+    <div class="grid grid-4">
+      ${row('PAN/IT No.', d.pan)}${row('Registration Type', d.registrationType)}${row('GSTIN/UIN', d.gstin)}
+    </div>
+    <div class="section-title">Banking Details</div>
+    <div class="grid grid-4">
+      ${row("A/c Holder's Name", d.bankHolderName)}${row('A/c No.', d.bankAccountNo)}${row('IFS Code', d.ifsc)}
+      ${row('SWIFT Code', d.swift)}${row('Bank Name', d.bankName)}${row('Branch', d.branch)}
+    </div>
+    ${openingBills.length ? `
+    <div class="section-title">Opening Bills</div>
+    <div class="tablewrap"><table><thead><tr><th>Date</th><th>Reference</th><th>Amount</th></tr></thead>
+    <tbody>${openingBills.map(b=>`<tr><td>${b.date||''}</td><td>${escapeHtml(b.reference||'')}</td><td class="num">₹${fmt(b.amount||0)}</td></tr>`).join("")}</tbody></table></div>` : ''}
+    <div class="row">
+      <button class="btn gold" id="viewToEditAccBtn">Edit</button>
+      <button class="btn ghost" id="closeAccViewBtn">Close</button>
+    </div>
+  </div>`;
+}
+
 function renderChartOfAccounts(){
   let sorted = DB.ledgerAccounts.slice().sort((a,b)=>a.accGroup.localeCompare(b.accGroup)||a.name.localeCompare(b.name));
   if(accSearch.trim()){
@@ -2902,6 +2949,7 @@ function renderChartOfAccounts(){
       <td>${a.isParty ? (a.partyType||'Party') : ''}</td>
       <td class="num">${fmt(accountBalance(a.id))} ${a.nature==="Asset"||a.nature==="Expense"?'Dr':'Cr'}</td>
       <td class="actions">
+        <button class="btn ghost sm viewAccBtn">View</button>
         <button class="btn ghost sm editAccBtn">Edit</button>
         ${a.isSystem ? '<span class="helptext">system</span>' : `<button class="btn danger sm delAccBtn">Delete</button>`}
       </td>
@@ -2923,6 +2971,7 @@ function renderChartOfAccounts(){
     </div>
     ${renderPager("chartOfAccounts", page, totalPages, total)}
   </div>
+  ${renderAccountViewCard()}
   <details class="collapse-card" id="accFormDetails" ${(accFormDetailsOpen || editing) ? 'open' : ''}>
     <summary>${editing ? `Edit Account - ${escapeHtml(editing.name)}` : `Add Account <span class="hotkey-tag">Alt+C</span>`}<span class="sub">Name, group, party status, opening balance, mailing/tax/banking details.</span></summary>
     <div class="collapse-body">
@@ -6370,6 +6419,7 @@ function attachHandlers(){
       };
       document.querySelectorAll(".editAccBtn").forEach(b=>b.onclick=(e)=>{
         accEditingId = e.target.closest("tr").dataset.id;
+        accViewingId = null;
         const acc = DB.ledgerAccounts.find(a=>a.id===accEditingId);
         openingBillsDraft = (acc && acc.details && acc.details.openingBills || []).map(b=>({...b}));
         accFormDetailsOpen = true;
@@ -6377,8 +6427,27 @@ function attachHandlers(){
         const el = document.getElementById("acc_name");
         if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
       });
+      document.querySelectorAll(".viewAccBtn").forEach(b=>b.onclick=(e)=>{
+        accViewingId = e.target.closest("tr").dataset.id;
+        renderAll();
+        const el = document.getElementById("accViewCard");
+        if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+      });
       const cancelAccEditBtn = document.getElementById("cancelAccEditBtn");
       if(cancelAccEditBtn) cancelAccEditBtn.onclick = ()=>{ accEditingId = null; openingBillsDraft = []; renderAll(); };
+      const closeAccViewBtn = document.getElementById("closeAccViewBtn");
+      if(closeAccViewBtn) closeAccViewBtn.onclick = ()=>{ accViewingId = null; renderAll(); };
+      const viewToEditAccBtn = document.getElementById("viewToEditAccBtn");
+      if(viewToEditAccBtn) viewToEditAccBtn.onclick = ()=>{
+        accEditingId = accViewingId;
+        accViewingId = null;
+        const acc = DB.ledgerAccounts.find(a=>a.id===accEditingId);
+        openingBillsDraft = (acc && acc.details && acc.details.openingBills || []).map(b=>({...b}));
+        accFormDetailsOpen = true;
+        renderAll();
+        const el = document.getElementById("acc_name");
+        if(el) el.scrollIntoView({behavior:"smooth", block:"center"});
+      };
       const syncOpeningBillsDraft = ()=>{
         const dates = document.querySelectorAll(".obDate"), refs = document.querySelectorAll(".obRef"), amts = document.querySelectorAll(".obAmount");
         openingBillsDraft = Array.from(dates).map((el,i)=>({id:(openingBillsDraft[i]&&openingBillsDraft[i].id)||newId("OB"), date:el.value, reference:refs[i].value, amount:parseFloat(amts[i].value)||0}));
@@ -6402,6 +6471,7 @@ function attachHandlers(){
         if(error){ toast("Could not delete: " + error.message, true); return; }
         DB.ledgerAccounts = DB.ledgerAccounts.filter(a=>a.id!==id);
         if(accEditingId===id) accEditingId = null;
+        if(accViewingId===id) accViewingId = null;
         toast("Account deleted.");
         renderAll();
       });
