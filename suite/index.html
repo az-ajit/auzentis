@@ -2428,7 +2428,7 @@ async function saveVoucher(voucher, lines){
   const cleanLines = lines.filter(l=>(l.debit||0)>0 || (l.credit||0)>0);
   const totalDr = cleanLines.reduce((a,l)=>a+(l.debit||0),0);
   const totalCr = cleanLines.reduce((a,l)=>a+(l.credit||0),0);
-  if(cleanLines.length < 2){ toast("A voucher needs at least two line entries.", true); return false; }
+  if(cleanLines.length < 2){ toast("Enter a Debit or Credit amount on at least two lines - a row with both left at 0 doesn't count as an entry.", true); return false; }
   if(Math.abs(totalDr-totalCr) > 0.01){ toast(`Voucher does not balance - Dr ${fmt(totalDr)} vs Cr ${fmt(totalCr)}.`, true); return false; }
   try{
     const { error: vErr } = await sb.from("vouchers").insert({
@@ -2487,7 +2487,7 @@ async function updateVoucherChildren(voucher, lines, items, billAllocs){
       const cleanLines = lines.filter(l=>(l.debit||0)>0 || (l.credit||0)>0);
       const totalDr = cleanLines.reduce((a,l)=>a+(l.debit||0),0);
       const totalCr = cleanLines.reduce((a,l)=>a+(l.credit||0),0);
-      if(cleanLines.length < 2){ toast("A voucher needs at least two line entries.", true); return false; }
+      if(cleanLines.length < 2){ toast("Enter a Debit or Credit amount on at least two lines - a row with both left at 0 doesn't count as an entry.", true); return false; }
       if(Math.abs(totalDr-totalCr) > 0.01){ toast(`Voucher does not balance - Dr ${fmt(totalDr)} vs Cr ${fmt(totalCr)}.`, true); return false; }
       lines = cleanLines;
     }
@@ -5728,6 +5728,13 @@ function attachHandlers(){
       await save("employees");
       await logAudit(editingId ? "update" : "create", "employees", id, {name});
       toast("Employee saved.");
+      if(!editingId){
+        // Otherwise a new employee can land on any page of the sorted/filtered list and look
+        // like it silently failed to save. Filtering to their name guarantees it's visible.
+        employeeSearch = name;
+        employeeStatusFilter = "";
+        paginationState["employees"] = 1;
+      }
       renderAll();
     };
 
@@ -6261,6 +6268,8 @@ function attachHandlers(){
           if(error){ toast("Could not add item: " + error.message, true); return; }
           DB.stockItems.push({id, ...values});
           toast("Item added.");
+          itemSearch = values.name;
+          paginationState["stockItems"] = 1;
         }
         renderAll();
       };
@@ -6351,6 +6360,11 @@ function attachHandlers(){
           await logAudit("create", "ledger_accounts", id, {name});
           toast("Account added.");
           openingBillsDraft = [];
+          // Without this, the new account lands wherever it sorts/paginates to - easy to miss
+          // entirely and assume it didn't save. Filtering straight to its name guarantees it's
+          // the only (and therefore visible) row right after adding it.
+          accSearch = name;
+          paginationState["chartOfAccounts"] = 1;
         }
         renderAll();
       };
