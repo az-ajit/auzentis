@@ -6179,6 +6179,8 @@ function attachHandlers(){
         const editingId = val("accEditingId");
         const name = val("acc_name").trim();
         if(!name){ toast("Enter an account name.", true); return; }
+        const dupAcc = DB.ledgerAccounts.find(a=>a.id!==editingId && a.name.trim().toLowerCase()===name.toLowerCase());
+        if(dupAcc){ toast(`An account named "${dupAcc.name}" already exists - names must be unique. Use a different name, or find it in the list above and click Edit instead.`, true); return; }
         const [nature, accGroup] = val("acc_group").split("|");
         const isPartyType = val("acc_isparty");
         const openingBalance = parseFloat(val("acc_opening"))||0;
@@ -6215,7 +6217,14 @@ function attachHandlers(){
             party_type: isPartyType || null, opening_balance: openingBalance,
             opening_balance_type: "Dr", is_system: false, details };
           const { error } = await sb.from("ledger_accounts").insert(row);
-          if(error){ toast("Could not add account: " + error.message, true); return; }
+          if(error){
+            if(error.code==="23505" || /ledger_accounts_name_key/.test(error.message)){
+              toast(`An account named "${name}" already exists - names must be unique. Use a different name, or find it in the list above and click Edit instead.`, true);
+            } else {
+              toast("Could not add account: " + error.message, true);
+            }
+            return;
+          }
           DB.ledgerAccounts.push({id, name, accGroup, nature, isParty:!!isPartyType, partyType:isPartyType||null,
             openingBalance, openingBalanceType:"Dr", isSystem:false, details});
           await logAudit("create", "ledger_accounts", id, {name});
