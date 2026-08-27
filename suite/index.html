@@ -908,9 +908,15 @@ function computeBonusEarnings(entry){
   const plan = structure && structure.bonusPlanId ? DB.bonusPlans.find(p=>p.id===structure.bonusPlanId) : null;
   const rules = plan ? (plan.rules||[]) : [];
   const earned = [];
+  // An "attendance" bonus rewards a perfect FULL month - someone who joined mid-month (e.g. the
+  // 24th) only worked part of it, so however clean their partial-month attendance was, this
+  // period isn't a full month for them. The rule starts applying from their first full month.
+  const emp = DB.employees.find(e=>e.id===entry.empId);
+  const totalDaysInPeriod = daysInMonth(entry.year, entry.month);
+  const joinedFullMonth = emp && availableDays(emp.doj, entry.year, entry.month, totalDaysInPeriod) === totalDaysInPeriod;
   for(const rule of rules){
     if(rule.type==="attendance"){
-      if((entry.leaves||0)===0 && (entry.lopHours||0)===0) earned.push({name:rule.name, amount:rule.amount});
+      if(joinedFullMonth && (entry.leaves||0)===0 && (entry.lopHours||0)===0) earned.push({name:rule.name, amount:rule.amount});
     } else if(rule.type==="quality"){
       const q = entry.quality;
       if(q!==null && q!==undefined && q!==""){
