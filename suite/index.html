@@ -903,6 +903,20 @@ function computeProductionIncentive(units, slabs){
 // period. "attendance" rules pay a flat amount for a perfect month (0
 // leaves, 0 LOP hours); "quality" rules pay the highest tier whose minimum
 // quality % is met; "production" rules pay the marginal slab incentive.
+// Quality/Production bonuses just need "basically a full month", not a literally perfect one -
+// joining by this cutoff day still qualifies for that month; joining any later pushes the
+// bonus to next month. (Attendance bonus is stricter - see joinedFullMonth below.)
+const BONUS_QUALITY_PRODUCTION_JOIN_CUTOFF_DAY = 5;
+function joinedByCutoffDay(doj, year, month, cutoffDay){
+  const d = new Date(doj+"T00:00:00");
+  const dy = d.getFullYear(), dm = d.getMonth()+1, dd = d.getDate();
+  if(dy===year && dm===month) return dd <= cutoffDay;
+  const firstOfMonth = new Date(year, month-1, 1);
+  const dojFirst = new Date(dy, dm-1, 1);
+  if(firstOfMonth < dojFirst) return false; // hasn't joined yet as of this period
+  return true; // joined in a fully prior month
+}
+
 function computeBonusEarnings(entry){
   const structure = structureFor(entry.empId, entry.month, entry.year);
   const plan = structure && structure.bonusPlanId ? DB.bonusPlans.find(p=>p.id===structure.bonusPlanId) : null;
@@ -914,19 +928,20 @@ function computeBonusEarnings(entry){
   const emp = DB.employees.find(e=>e.id===entry.empId);
   const totalDaysInPeriod = daysInMonth(entry.year, entry.month);
   const joinedFullMonth = emp && availableDays(emp.doj, entry.year, entry.month, totalDaysInPeriod) === totalDaysInPeriod;
+  const joinedInTime = emp && joinedByCutoffDay(emp.doj, entry.year, entry.month, BONUS_QUALITY_PRODUCTION_JOIN_CUTOFF_DAY);
   for(const rule of rules){
     if(rule.type==="attendance"){
       if(joinedFullMonth && (entry.leaves||0)===0 && (entry.lopHours||0)===0) earned.push({name:rule.name, amount:rule.amount});
     } else if(rule.type==="quality"){
       const q = entry.quality;
-      if(q!==null && q!==undefined && q!==""){
+      if(joinedInTime && q!==null && q!==undefined && q!==""){
         const tiers = (rule.tiers||[]).slice().sort((a,b)=>b.minPct-a.minPct);
         const hit = tiers.find(t=>Number(q)>=t.minPct);
         if(hit) earned.push({name:rule.name, amount:hit.amount});
       }
     } else if(rule.type==="production"){
       const u = entry.units;
-      if(u!==null && u!==undefined && u!==""){
+      if(joinedInTime && u!==null && u!==undefined && u!==""){
         const amt = computeProductionIncentive(Number(u), rule.slabs||[]);
         if(amt>0) earned.push({name:rule.name, amount:amt});
       }
