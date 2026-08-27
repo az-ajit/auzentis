@@ -3198,6 +3198,43 @@ function resetVoucherFormState(){
 
 function voucherItemRowAmount(r){ return round2((r.qty||0) * (r.rate||0) * (1 - (r.discountPct||0)/100)); }
 
+// Patches the per-row Amount cells and the Taxable Value/GST/Grand Total footer in place after
+// a Qty/Rate/Disc/Round Off edit - without a full renderAll(), so typing into a number field
+// doesn't lose focus on every keystroke. Duplicates the same formula each item-wise voucher
+// form (Sales/Purchase, Credit/Debit Note, Order/Note) already computes at render time; those
+// stay the source of truth (this only has to match them, not replace them).
+function updateItemRowTotals(){
+  voucherItemRows.forEach((r,i)=>{
+    const cell = document.querySelector(`.viAmount[data-i="${i}"]`);
+    if(cell) cell.textContent = fmt(voucherItemRowAmount(r));
+  });
+  const taxableValue = round2(voucherItemRows.reduce((s,r)=>s+voucherItemRowAmount(r),0));
+  const gstTotal = round2(voucherItemRows.reduce((s,r)=>{
+    const item = DB.stockItems.find(x=>x.id===r.stockItemId);
+    return s + voucherItemRowAmount(r) * (item ? item.gstRate : 0)/100;
+  },0));
+  const taxableEl = document.getElementById("vi_taxable");
+  if(taxableEl) taxableEl.textContent = "₹ " + fmt(taxableValue);
+
+  if(voucherType==="Sales" || voucherType==="Purchase" || voucherType==="CreditNote" || voucherType==="DebitNote"){
+    const party = DB.ledgerAccounts.find(a=>a.id===voucherSalesPartyId);
+    const partyState = (party && party.details && party.details.state) ? party.details.state.trim() : "";
+    const companyState = (DB.settings.companyState||"").trim();
+    const isInterState = !!(partyState && companyState && partyState.toLowerCase() !== companyState.toLowerCase());
+    const cgst = isInterState ? 0 : round2(gstTotal/2);
+    const sgst = isInterState ? 0 : round2(gstTotal-cgst);
+    const igst = isInterState ? gstTotal : 0;
+    const grandTotal = round2(taxableValue + gstTotal + (voucherRoundOff||0));
+    const cgstEl = document.getElementById("vi_cgst"); if(cgstEl) cgstEl.textContent = "₹ " + fmt(cgst);
+    const sgstEl = document.getElementById("vi_sgst"); if(sgstEl) sgstEl.textContent = "₹ " + fmt(sgst);
+    const igstEl = document.getElementById("vi_igst"); if(igstEl) igstEl.textContent = "₹ " + fmt(igst);
+    const gtEl = document.getElementById("vi_grandtotal"); if(gtEl) gtEl.textContent = "₹ " + fmt(grandTotal);
+  } else {
+    const estGstEl = document.getElementById("vi_estgst"); if(estGstEl) estGstEl.textContent = "₹ " + fmt(gstTotal);
+    const gtEl = document.getElementById("vi_grandtotal"); if(gtEl) gtEl.textContent = "₹ " + fmt(round2(taxableValue+gstTotal));
+  }
+}
+
 function voucherFormSalesPurchase(type){
   const isSales = type==="Sales";
   const partyList = parties(isSales?"Debtor":"Creditor");
@@ -3228,7 +3265,7 @@ function voucherFormSalesPurchase(type){
       <td><input type="number" class="viQty" data-i="${i}" value="${r.qty}" min="0" style="width:80px;"></td>
       <td><input type="number" class="viRate" data-i="${i}" value="${r.rate}" min="0" style="width:100px;"></td>
       <td><input type="number" class="viDisc" data-i="${i}" value="${r.discountPct||0}" min="0" max="100" style="width:70px;"></td>
-      <td class="num">${fmt(voucherItemRowAmount(r))}</td>
+      <td class="num viAmount" data-i="${i}">${fmt(voucherItemRowAmount(r))}</td>
       <td>${item ? item.gstRate+'%' : '-'}</td>
       <td><button type="button" class="btn danger sm viRemoveBtn" data-i="${i}">Remove</button></td>
     </tr>`;
@@ -3256,13 +3293,13 @@ function voucherFormSalesPurchase(type){
     </div>
     <div class="row"><button type="button" class="btn ghost sm" id="viAddRowBtn">+ Add Item</button></div>
     <div class="grid grid-4" style="margin-top:12px;">
-      <div class="field"><label>Taxable Value</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
+      <div class="field"><label>Taxable Value</label><div id="vi_taxable" style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
       ${isInterState
-        ? `<div class="field"><label>IGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(igst)}</div></div>`
-        : `<div class="field"><label>CGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(cgst)}</div></div><div class="field"><label>SGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(sgst)}</div></div>`}
+        ? `<div class="field"><label>IGST</label><div id="vi_igst" style="padding:8px 0;font-weight:600;">₹ ${fmt(igst)}</div></div>`
+        : `<div class="field"><label>CGST</label><div id="vi_cgst" style="padding:8px 0;font-weight:600;">₹ ${fmt(cgst)}</div></div><div class="field"><label>SGST</label><div id="vi_sgst" style="padding:8px 0;font-weight:600;">₹ ${fmt(sgst)}</div></div>`}
       <div class="field"><label>Round Off (₹)</label><input type="number" step="0.01" id="v_roundoff" value="${voucherRoundOff}">
         <button type="button" class="btn ghost sm" id="autoRoundBtn" style="margin-top:6px;">Round to nearest ₹</button></div>
-      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(round2(grandTotal+voucherRoundOff))}</div></div>
+      <div class="field"><label>Grand Total</label><div id="vi_grandtotal" style="padding:8px 0;font-weight:700;">₹ ${fmt(round2(grandTotal+voucherRoundOff))}</div></div>
     </div>
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${type} Voucher</button>`;
 }
@@ -3305,7 +3342,7 @@ function voucherFormCreditDebitNote(type){
       <td><input type="number" class="viQty" data-i="${i}" value="${r.qty}" min="0" style="width:80px;"></td>
       <td><input type="number" class="viRate" data-i="${i}" value="${r.rate}" min="0" style="width:100px;"></td>
       <td><input type="number" class="viDisc" data-i="${i}" value="${r.discountPct||0}" min="0" max="100" style="width:70px;"></td>
-      <td class="num">${fmt(voucherItemRowAmount(r))}</td>
+      <td class="num viAmount" data-i="${i}">${fmt(voucherItemRowAmount(r))}</td>
       <td>${item ? item.gstRate+'%' : '-'}</td>
       <td><button type="button" class="btn danger sm viRemoveBtn" data-i="${i}">Remove</button></td>
     </tr>`;
@@ -3354,13 +3391,13 @@ function voucherFormCreditDebitNote(type){
     </div>
     <div class="row"><button type="button" class="btn ghost sm" id="viAddRowBtn">+ Add Item</button></div>
     <div class="grid grid-4" style="margin-top:12px;">
-      <div class="field"><label>Taxable Value</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
+      <div class="field"><label>Taxable Value</label><div id="vi_taxable" style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
       ${isInterState
-        ? `<div class="field"><label>IGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(igst)}</div></div>`
-        : `<div class="field"><label>CGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(cgst)}</div></div><div class="field"><label>SGST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(sgst)}</div></div>`}
+        ? `<div class="field"><label>IGST</label><div id="vi_igst" style="padding:8px 0;font-weight:600;">₹ ${fmt(igst)}</div></div>`
+        : `<div class="field"><label>CGST</label><div id="vi_cgst" style="padding:8px 0;font-weight:600;">₹ ${fmt(cgst)}</div></div><div class="field"><label>SGST</label><div id="vi_sgst" style="padding:8px 0;font-weight:600;">₹ ${fmt(sgst)}</div></div>`}
       <div class="field"><label>Round Off (₹)</label><input type="number" step="0.01" id="v_roundoff" value="${voucherRoundOff}">
         <button type="button" class="btn ghost sm" id="autoRoundBtn" style="margin-top:6px;">Round to nearest ₹</button></div>
-      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(round2(grandTotal+voucherRoundOff))}</div></div>
+      <div class="field"><label>Grand Total</label><div id="vi_grandtotal" style="padding:8px 0;font-weight:700;">₹ ${fmt(round2(grandTotal+voucherRoundOff))}</div></div>
     </div>
     ${billSectionHtml}
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${isCredit?'Credit':'Debit'} Note</button>`;
@@ -3391,7 +3428,7 @@ function voucherFormOrderNote(type){
       <td><input type="number" class="viQty" data-i="${i}" value="${r.qty}" min="0" style="width:80px;"></td>
       <td><input type="number" class="viRate" data-i="${i}" value="${r.rate}" min="0" style="width:100px;"></td>
       <td><input type="number" class="viDisc" data-i="${i}" value="${r.discountPct||0}" min="0" max="100" style="width:70px;"></td>
-      <td class="num">${fmt(voucherItemRowAmount(r))}</td>
+      <td class="num viAmount" data-i="${i}">${fmt(voucherItemRowAmount(r))}</td>
       <td>${item ? item.gstRate+'%' : '-'}</td>
       <td><button type="button" class="btn danger sm viRemoveBtn" data-i="${i}">Remove</button></td>
     </tr>`;
@@ -3415,9 +3452,9 @@ function voucherFormOrderNote(type){
     </div>
     <div class="row"><button type="button" class="btn ghost sm" id="viAddRowBtn">+ Add Item</button></div>
     <div class="grid grid-4" style="margin-top:12px;">
-      <div class="field"><label>Taxable Value</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
-      <div class="field"><label>Est. GST</label><div style="padding:8px 0;font-weight:600;">₹ ${fmt(gstTotal)}</div></div>
-      <div class="field"><label>Grand Total</label><div style="padding:8px 0;font-weight:700;">₹ ${fmt(grandTotal)}</div></div>
+      <div class="field"><label>Taxable Value</label><div id="vi_taxable" style="padding:8px 0;font-weight:600;">₹ ${fmt(taxableValue)}</div></div>
+      <div class="field"><label>Est. GST</label><div id="vi_estgst" style="padding:8px 0;font-weight:600;">₹ ${fmt(gstTotal)}</div></div>
+      <div class="field"><label>Grand Total</label><div id="vi_grandtotal" style="padding:8px 0;font-weight:700;">₹ ${fmt(grandTotal)}</div></div>
     </div>
     <button class="btn gold" id="saveVoucherBtn" data-kind="${type}">Save ${voucherTypeLabel(type)}</button>`;
 }
@@ -6608,12 +6645,12 @@ function attachHandlers(){
           if(item && !voucherItemRows[i].rate) voucherItemRows[i].rate = item.defaultRate||0;
           renderAll();
         });
-        document.querySelectorAll(".viQty").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].qty = parseFloat(inp.value)||0; });
-        document.querySelectorAll(".viRate").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].rate = parseFloat(inp.value)||0; });
-        document.querySelectorAll(".viDisc").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].discountPct = parseFloat(inp.value)||0; });
+        document.querySelectorAll(".viQty").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].qty = parseFloat(inp.value)||0; updateItemRowTotals(); });
+        document.querySelectorAll(".viRate").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].rate = parseFloat(inp.value)||0; updateItemRowTotals(); });
+        document.querySelectorAll(".viDisc").forEach(inp=>inp.oninput=()=>{ voucherItemRows[parseInt(inp.dataset.i)].discountPct = parseFloat(inp.value)||0; updateItemRowTotals(); });
 
         const roundOffInp = document.getElementById("v_roundoff");
-        if(roundOffInp) roundOffInp.oninput = ()=>{ voucherRoundOff = parseFloat(roundOffInp.value)||0; };
+        if(roundOffInp) roundOffInp.oninput = ()=>{ voucherRoundOff = parseFloat(roundOffInp.value)||0; updateItemRowTotals(); };
         const autoRoundBtn = document.getElementById("autoRoundBtn");
         if(autoRoundBtn) autoRoundBtn.onclick = ()=>{
           const taxableValue = round2(voucherItemRows.reduce((s,r)=>s+voucherItemRowAmount(r),0));
