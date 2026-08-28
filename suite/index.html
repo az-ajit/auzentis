@@ -4461,36 +4461,15 @@ function renderAttendance(){
 // the update-my-details Edge Function, which enforces server-side that the
 // caller can only touch their own employee row and only these fields -
 // this page's own field list is just for display, not a security boundary.
+let myProfileEditMode = false;
 function renderMyProfile(){
   const emp = DB.employees.find(e=>e.id===currentEmpId);
   if(!emp){
     return `<div class="card"><div class="empty">Your login isn't linked to an employee record yet. Ask your Admin to link you in the Team tab.</div></div>`;
   }
   const d = emp.details || {};
-  const maskedField = (id, value) => `
-      <div class="field">
-        <label>${id==='mp_pan'?'PAN':id==='mp_aadhar'?'Aadhar':'A/c No.'}</label>
-        <div style="display:flex;gap:6px;">
-          <input id="${id}" value="${value?maskTail(value):''}" ${value?'readonly':''} style="flex:1;">
-          ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
-        </div>
-      </div>`;
-  // Not sensitive enough to mask (unlike PAN/Aadhar/A/c No.), but still locked once set - so a
-  // saved detail can never be overwritten by an accidental stray keystroke. "Change" clears it
-  // for a deliberate re-entry, same interaction as the masked fields above.
-  const lockedField = (id, label, value, type, spanCols) => `
-      <div class="field"${spanCols?` style="grid-column:span ${spanCols};"`:''}>
-        <label>${label}</label>
-        <div style="display:flex;gap:6px;">
-          <input ${type?`type="${type}"`:''} id="${id}" value="${escapeHtml(value||'')}" ${value?'readonly':''} style="flex:1;">
-          ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
-        </div>
-      </div>`;
   const overviewField = (label, value) => `<div class="field"><label>${label}</label><div style="padding:7px 9px;font-size:13px;">${value||'<span class="helptext">-</span>'}</div></div>`;
-  return `
-  <div class="card">
-    <h2>My Profile</h2>
-    <div class="sub">Keep your own details up to date - HR uses this for payroll and records. Changes save straight to your employee record. Set your Date of Birth so we can wish you on your birthday!</div>
+  const overviewBlock = `
     <div class="section-title">Overview</div>
     <p class="helptext">These are set by HR - contact them if anything here needs correcting.</p>
     <div class="grid grid-4">
@@ -4501,25 +4480,71 @@ function renderMyProfile(){
       ${overviewField('Email', escapeHtml(emp.email||''))}
       ${overviewField('Date of Joining', emp.doj)}
       ${overviewField('Status', `<span class="pill ${emp.status==='Active'?'ok':'warn'}">${emp.status}</span>`)}
-    </div>
-    <p class="helptext">Every field below locks once saved - PAN, Aadhar and Bank A/c No. are also masked for your security. Click "Change" next to a field to clear and re-enter it.</p>
+    </div>`;
+
+  if(!myProfileEditMode){
+    // Plain read-only view - the whole point being nothing here can be changed by accident.
+    // Sensitive numbers stay masked even in view mode; Edit is the only door into changing
+    // anything, and even inside Edit those three still need their own explicit "Change".
+    return `
+    <div class="card">
+      <h2>My Profile</h2>
+      <div class="sub">HR uses these details for payroll and records.</div>
+      ${overviewBlock}
+      <div class="section-title">Personal Details</div>
+      <div class="grid grid-4">
+        ${overviewField('Date of Birth', emp.dob)}
+        ${overviewField('PAN', d.pan?maskTail(d.pan):'')}
+        ${overviewField('Aadhar', d.aadhar?maskTail(d.aadhar):'')}
+        ${overviewField('Address', escapeHtml(d.address||''))}
+        ${overviewField('Emergency Contact Name', escapeHtml(d.emergencyContactName||''))}
+        ${overviewField('Emergency Contact Phone', escapeHtml(d.emergencyContactPhone||''))}
+      </div>
+      <div class="section-title">Bank Details (for salary payment)</div>
+      <div class="grid grid-4">
+        ${overviewField("A/c Holder's Name", escapeHtml(d.bankAccountName||''))}
+        ${overviewField('A/c No.', d.bankAccountNo?maskTail(d.bankAccountNo):'')}
+        ${overviewField('IFSC', escapeHtml(d.ifsc||''))}
+        ${overviewField('Bank Name', escapeHtml(d.bankName||''))}
+      </div>
+      <button class="btn gold" id="editMyProfileBtn">Edit</button>
+    </div>`;
+  }
+
+  const maskedField = (id, value) => `
+      <div class="field">
+        <label>${id==='mp_pan'?'PAN':id==='mp_aadhar'?'Aadhar':'A/c No.'}</label>
+        <div style="display:flex;gap:6px;">
+          <input id="${id}" value="${value?maskTail(value):''}" ${value?'readonly':''} style="flex:1;">
+          ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
+        </div>
+      </div>`;
+  return `
+  <div class="card">
+    <h2>My Profile - Editing</h2>
+    <div class="sub">Changes save straight to your employee record. Set your Date of Birth so we can wish you on your birthday!</div>
+    ${overviewBlock}
+    <p class="helptext">PAN, Aadhar and Bank A/c No. are masked for your security - click "Change" to clear and re-enter one.</p>
     <div class="section-title">Personal Details</div>
     <div class="grid grid-4">
-      ${lockedField('mp_dob', 'Date of Birth', emp.dob, 'date')}
+      <div class="field"><label>Date of Birth</label><input type="date" id="mp_dob" value="${emp.dob||''}"></div>
       ${maskedField('mp_pan', d.pan)}
       ${maskedField('mp_aadhar', d.aadhar)}
-      ${lockedField('mp_address', 'Address', d.address, null, 2)}
-      ${lockedField('mp_emergencyName', 'Emergency Contact Name', d.emergencyContactName)}
-      ${lockedField('mp_emergencyPhone', 'Emergency Contact Phone', d.emergencyContactPhone)}
+      <div class="field" style="grid-column:span 2;"><label>Address</label><input id="mp_address" value="${escapeHtml(d.address||'')}"></div>
+      <div class="field"><label>Emergency Contact Name</label><input id="mp_emergencyName" value="${escapeHtml(d.emergencyContactName||'')}"></div>
+      <div class="field"><label>Emergency Contact Phone</label><input id="mp_emergencyPhone" value="${escapeHtml(d.emergencyContactPhone||'')}"></div>
     </div>
     <div class="section-title">Bank Details (for salary payment)</div>
     <div class="grid grid-4">
-      ${lockedField('mp_bankHolder', "A/c Holder's Name", d.bankAccountName)}
+      <div class="field"><label>A/c Holder's Name</label><input id="mp_bankHolder" value="${escapeHtml(d.bankAccountName||'')}"></div>
       ${maskedField('mp_bankAccNo', d.bankAccountNo)}
-      ${lockedField('mp_ifsc', 'IFSC', d.ifsc)}
-      ${lockedField('mp_bankName', 'Bank Name', d.bankName)}
+      <div class="field"><label>IFSC</label><input id="mp_ifsc" value="${escapeHtml(d.ifsc||'')}"></div>
+      <div class="field"><label>Bank Name</label><input id="mp_bankName" value="${escapeHtml(d.bankName||'')}"></div>
     </div>
-    <button class="btn gold" id="saveMyProfileBtn">Save</button>
+    <div class="row">
+      <button class="btn gold" id="saveMyProfileBtn">Save</button>
+      <button class="btn ghost" id="cancelMyProfileBtn">Cancel</button>
+    </div>
   </div>`;
 }
 
@@ -7036,6 +7061,10 @@ function attachHandlers(){
   }
 
   if(activeTab==="My Profile"){
+    const editMyProfileBtn = document.getElementById("editMyProfileBtn");
+    if(editMyProfileBtn) editMyProfileBtn.onclick = ()=>{ myProfileEditMode = true; renderAll(); };
+    const cancelMyProfileBtn = document.getElementById("cancelMyProfileBtn");
+    if(cancelMyProfileBtn) cancelMyProfileBtn.onclick = ()=>{ myProfileEditMode = false; renderAll(); };
     document.querySelectorAll(".mpUnlockBtn").forEach(b=>b.onclick=()=>{
       const input = document.getElementById(b.dataset.target);
       input.readOnly = false; input.value = ""; input.focus();
@@ -7047,27 +7076,27 @@ function attachHandlers(){
       try{
         const emp = DB.employees.find(e=>e.id===currentEmpId);
         const existingDetails = emp ? (emp.details||{}) : {};
-        // Locked fields (still showing their saved value, untouched - masked or not) send the
-        // real saved value back unchanged, never whatever's currently on screen in that state.
-        const lockedOrVal = (id, existing) => { const el = document.getElementById(id); return el.readOnly ? (existing||"") : val(id).trim(); };
-        const dobEl = document.getElementById("mp_dob");
-        const dob = dobEl.readOnly ? (emp?emp.dob:"")||"" : val("mp_dob");
+        // Masked fields (still showing their placeholder, untouched) send the real saved value
+        // back unchanged, never the masked text currently on screen.
+        const maskedOrVal = (id, existing) => { const el = document.getElementById(id); return el.readOnly ? (existing||"") : val(id).trim(); };
+        const dob = val("mp_dob");
         const patch = {
-          pan: lockedOrVal("mp_pan", existingDetails.pan),
-          aadhar: lockedOrVal("mp_aadhar", existingDetails.aadhar),
-          address: lockedOrVal("mp_address", existingDetails.address),
-          emergencyContactName: lockedOrVal("mp_emergencyName", existingDetails.emergencyContactName),
-          emergencyContactPhone: lockedOrVal("mp_emergencyPhone", existingDetails.emergencyContactPhone),
-          bankAccountName: lockedOrVal("mp_bankHolder", existingDetails.bankAccountName),
-          bankAccountNo: lockedOrVal("mp_bankAccNo", existingDetails.bankAccountNo),
-          ifsc: lockedOrVal("mp_ifsc", existingDetails.ifsc),
-          bankName: lockedOrVal("mp_bankName", existingDetails.bankName),
+          pan: maskedOrVal("mp_pan", existingDetails.pan),
+          aadhar: maskedOrVal("mp_aadhar", existingDetails.aadhar),
+          address: val("mp_address").trim(),
+          emergencyContactName: val("mp_emergencyName").trim(),
+          emergencyContactPhone: val("mp_emergencyPhone").trim(),
+          bankAccountName: val("mp_bankHolder").trim(),
+          bankAccountNo: maskedOrVal("mp_bankAccNo", existingDetails.bankAccountNo),
+          ifsc: val("mp_ifsc").trim(),
+          bankName: val("mp_bankName").trim(),
         };
         const { data, error } = await sb.functions.invoke("update-my-details", { body: {...patch, dob} });
         if(error){ toast("Could not save: " + (await extractFnError(error)), true); return; }
         if(data && data.error){ toast(data.error, true); return; }
         if(emp){ emp.details = {...(emp.details||{}), ...patch}; if(dob) emp.dob = dob; }
         toast("Profile saved.");
+        myProfileEditMode = false;
         renderAll();
       }catch(err){
         console.error(err);
