@@ -4475,6 +4475,17 @@ function renderMyProfile(){
           ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
         </div>
       </div>`;
+  // Not sensitive enough to mask (unlike PAN/Aadhar/A/c No.), but still locked once set - so a
+  // saved detail can never be overwritten by an accidental stray keystroke. "Change" clears it
+  // for a deliberate re-entry, same interaction as the masked fields above.
+  const lockedField = (id, label, value, type, spanCols) => `
+      <div class="field"${spanCols?` style="grid-column:span ${spanCols};"`:''}>
+        <label>${label}</label>
+        <div style="display:flex;gap:6px;">
+          <input ${type?`type="${type}"`:''} id="${id}" value="${escapeHtml(value||'')}" ${value?'readonly':''} style="flex:1;">
+          ${value ? `<button type="button" class="btn ghost sm mpUnlockBtn" data-target="${id}" title="Clear and re-enter">Change</button>` : ''}
+        </div>
+      </div>`;
   const overviewField = (label, value) => `<div class="field"><label>${label}</label><div style="padding:7px 9px;font-size:13px;">${value||'<span class="helptext">-</span>'}</div></div>`;
   return `
   <div class="card">
@@ -4491,22 +4502,22 @@ function renderMyProfile(){
       ${overviewField('Date of Joining', emp.doj)}
       ${overviewField('Status', `<span class="pill ${emp.status==='Active'?'ok':'warn'}">${emp.status}</span>`)}
     </div>
-    <p class="helptext">For your security, PAN, Aadhar and Bank A/c No. are masked once saved. Click "Change" next to a field to clear and re-enter it.</p>
+    <p class="helptext">Every field below locks once saved - PAN, Aadhar and Bank A/c No. are also masked for your security. Click "Change" next to a field to clear and re-enter it.</p>
     <div class="section-title">Personal Details</div>
     <div class="grid grid-4">
-      <div class="field"><label>Date of Birth</label><input type="date" id="mp_dob" value="${emp.dob||''}"></div>
+      ${lockedField('mp_dob', 'Date of Birth', emp.dob, 'date')}
       ${maskedField('mp_pan', d.pan)}
       ${maskedField('mp_aadhar', d.aadhar)}
-      <div class="field" style="grid-column:span 2;"><label>Address</label><input id="mp_address" value="${escapeHtml(d.address||'')}"></div>
-      <div class="field"><label>Emergency Contact Name</label><input id="mp_emergencyName" value="${escapeHtml(d.emergencyContactName||'')}"></div>
-      <div class="field"><label>Emergency Contact Phone</label><input id="mp_emergencyPhone" value="${escapeHtml(d.emergencyContactPhone||'')}"></div>
+      ${lockedField('mp_address', 'Address', d.address, null, 2)}
+      ${lockedField('mp_emergencyName', 'Emergency Contact Name', d.emergencyContactName)}
+      ${lockedField('mp_emergencyPhone', 'Emergency Contact Phone', d.emergencyContactPhone)}
     </div>
     <div class="section-title">Bank Details (for salary payment)</div>
     <div class="grid grid-4">
-      <div class="field"><label>A/c Holder's Name</label><input id="mp_bankHolder" value="${escapeHtml(d.bankAccountName||'')}"></div>
+      ${lockedField('mp_bankHolder', "A/c Holder's Name", d.bankAccountName)}
       ${maskedField('mp_bankAccNo', d.bankAccountNo)}
-      <div class="field"><label>IFSC</label><input id="mp_ifsc" value="${escapeHtml(d.ifsc||'')}"></div>
-      <div class="field"><label>Bank Name</label><input id="mp_bankName" value="${escapeHtml(d.bankName||'')}"></div>
+      ${lockedField('mp_ifsc', 'IFSC', d.ifsc)}
+      ${lockedField('mp_bankName', 'Bank Name', d.bankName)}
     </div>
     <button class="btn gold" id="saveMyProfileBtn">Save</button>
   </div>`;
@@ -7034,20 +7045,23 @@ function attachHandlers(){
     if(saveMyProfileBtn) saveMyProfileBtn.onclick = async ()=>{
       saveMyProfileBtn.disabled = true; saveMyProfileBtn.textContent = "Saving...";
       try{
-        const dob = val("mp_dob");
         const emp = DB.employees.find(e=>e.id===currentEmpId);
         const existingDetails = emp ? (emp.details||{}) : {};
-        const panEl = document.getElementById("mp_pan"), aadharEl = document.getElementById("mp_aadhar"), bankAccEl = document.getElementById("mp_bankAccNo");
+        // Locked fields (still showing their saved value, untouched - masked or not) send the
+        // real saved value back unchanged, never whatever's currently on screen in that state.
+        const lockedOrVal = (id, existing) => { const el = document.getElementById(id); return el.readOnly ? (existing||"") : val(id).trim(); };
+        const dobEl = document.getElementById("mp_dob");
+        const dob = dobEl.readOnly ? (emp?emp.dob:"")||"" : val("mp_dob");
         const patch = {
-          // Masked+locked fields (still showing their saved value, untouched) send the real
-          // saved value back unchanged, not the masked placeholder that's on screen.
-          pan: panEl.readOnly ? (existingDetails.pan||"") : val("mp_pan").trim(),
-          aadhar: aadharEl.readOnly ? (existingDetails.aadhar||"") : val("mp_aadhar").trim(),
-          address: val("mp_address").trim(),
-          emergencyContactName: val("mp_emergencyName").trim(), emergencyContactPhone: val("mp_emergencyPhone").trim(),
-          bankAccountName: val("mp_bankHolder").trim(),
-          bankAccountNo: bankAccEl.readOnly ? (existingDetails.bankAccountNo||"") : val("mp_bankAccNo").trim(),
-          ifsc: val("mp_ifsc").trim(), bankName: val("mp_bankName").trim(),
+          pan: lockedOrVal("mp_pan", existingDetails.pan),
+          aadhar: lockedOrVal("mp_aadhar", existingDetails.aadhar),
+          address: lockedOrVal("mp_address", existingDetails.address),
+          emergencyContactName: lockedOrVal("mp_emergencyName", existingDetails.emergencyContactName),
+          emergencyContactPhone: lockedOrVal("mp_emergencyPhone", existingDetails.emergencyContactPhone),
+          bankAccountName: lockedOrVal("mp_bankHolder", existingDetails.bankAccountName),
+          bankAccountNo: lockedOrVal("mp_bankAccNo", existingDetails.bankAccountNo),
+          ifsc: lockedOrVal("mp_ifsc", existingDetails.ifsc),
+          bankName: lockedOrVal("mp_bankName", existingDetails.bankName),
         };
         const { data, error } = await sb.functions.invoke("update-my-details", { body: {...patch, dob} });
         if(error){ toast("Could not save: " + (await extractFnError(error)), true); return; }
