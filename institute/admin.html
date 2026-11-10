@@ -99,6 +99,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="js/supabase-client.js"></script>
 <script src="js/paginate.js"></script>
+<script src="js/interpretation.js"></script>
 <script>
 let myRole = null;
 const STATUS_OPTIONS = ["draft", "expert_reviewed", "pilot_ready", "pilot_tested", "under_validation", "validated", "suspended", "retired"];
@@ -318,7 +319,31 @@ async function approveSession(sessionId, btn) {
   });
   if (reviewErr) { alert(reviewErr.message); btn.disabled = false; return; }
 
-  const { data: scoreRow } = await supabaseClient.from("scores").select("*, domain_results(*)").eq("session_id", sessionId).single();
+  const { data: session } = await supabaseClient
+    .from("assessment_sessions")
+    .select("started_at, participants(full_name, age_band_code), assessments(title)")
+    .eq("id", sessionId)
+    .single();
+
+  const { data: scoreRow } = await supabaseClient.from("scores").select("*").eq("session_id", sessionId).single();
+  const { data: domainRows } = await supabaseClient
+    .from("domain_results")
+    .select("domain_score, correct_count, total_count, assessment_domains(name)")
+    .eq("score_id", scoreRow.id);
+
+  const content = buildReportContent({
+    participant: session.participants,
+    assessmentTitle: session.assessments?.title,
+    startedAt: session.started_at,
+    timeTakenSeconds: scoreRow.time_taken_seconds,
+    overallAccuracy: scoreRow.accuracy_pct,
+    domainResults: (domainRows || []).map((d) => ({
+      domain_name: d.assessment_domains?.name || "Unknown domain",
+      domain_score: d.domain_score,
+      correct_count: d.correct_count,
+      total_count: d.total_count,
+    })),
+  });
 
   const { error: reportErr } = await supabaseClient.from("reports").insert({
     session_id: sessionId,
@@ -327,7 +352,7 @@ async function approveSession(sessionId, btn) {
     status: "approved",
     approved_by: myId,
     approved_at: new Date().toISOString(),
-    snapshot_json: scoreRow,
+    snapshot_json: content,
   });
   if (reportErr) { alert(reportErr.message); btn.disabled = false; return; }
 

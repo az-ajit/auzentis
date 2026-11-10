@@ -119,7 +119,7 @@ function statTile(label, value) {
   if (participantIds.length) {
     const { data: sessionsData } = await supabaseClient
       .from("assessment_sessions")
-      .select("id, status, participant_id, assessments(title), scores(id, accuracy_pct), reports(status)")
+      .select("id, status, participant_id, assessments(title), scores(id, accuracy_pct), reports(id, status)")
       .in("participant_id", participantIds)
       .order("started_at", { ascending: false });
     sessions = sessionsData || [];
@@ -181,7 +181,7 @@ function statTile(label, value) {
       const accuracy = s.scores?.[0]?.accuracy_pct;
       const reportStatus = s.reports?.[0]?.status;
       const reportBadge = reportStatus === "approved"
-        ? '<span class="badge approved">approved</span>'
+        ? `<a href="report.html?report_id=${s.reports[0].id}"><span class="badge approved">View report</span></a>`
         : s.status === "completed" ? '<span class="badge pending">pending review</span>' : '<span class="badge draft">not yet</span>';
       return `<tr><td>${nameById[s.participant_id] || "—"}</td><td>${s.assessments?.title || "—"}</td>
         <td>${s.status}</td><td>${accuracy != null ? accuracy + "%" : "—"}</td><td>${reportBadge}</td></tr>`;

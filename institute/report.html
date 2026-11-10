@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report — Auzentis Institute</title>
+<link rel="icon" type="image/png" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="css/institute.css">
+<style>
+  @media print {
+    .site-header, .site-footer, .no-print { display: none !important; }
+    .page { max-width: 100%; }
+    .card { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header no-print">
+  <div class="brand">
+    <img src="../assets/icon_trimmed.png" alt="Auzentis">
+    <div class="brand-text">Auzentis <span>Institute</span></div>
+  </div>
+  <nav class="site-nav">
+    <a href="dashboard.html">Dashboard</a>
+  </nav>
+  <div class="header-right">
+    <button class="secondary small" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+</header>
+
+<div class="page" style="max-width:760px;">
+  <div id="loading" class="muted">Loading report…</div>
+  <div id="notFound" class="notice error" style="display:none;">Report not found, not yet approved, or you don't have access to it.</div>
+
+  <div id="reportBody" style="display:none;">
+
+    <div class="card" style="text-align:center;">
+      <img src="../assets/icon_trimmed.png" alt="Auzentis" style="height:36px;width:36px;">
+      <h1 style="font-size:17px;margin:6px 0 0;">Auzentis Institute — Pilot Assessment Report</h1>
+      <p class="muted" id="reportGeneratedAt"></p>
+    </div>
+
+    <div class="card">
+      <h2>1. Personal Profile</h2>
+      <table>
+        <tr><th>Participant</th><td id="pName"></td></tr>
+        <tr><th>Age band</th><td id="pAgeBand"></td></tr>
+        <tr><th>Assessment</th><td id="pAssessment"></td></tr>
+        <tr><th>Date taken</th><td id="pDate"></td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>2. Assessment Overview</h2>
+      <table>
+        <tr><th>Domains assessed</th><td id="oDomains"></td></tr>
+        <tr><th>Time taken</th><td id="oTime"></td></tr>
+        <tr><th>Overall accuracy</th><td id="oAccuracy"></td></tr>
+        <tr><th>Mode</th><td>Online</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>3. Executive Summary</h2>
+      <p id="execSummary"></p>
+    </div>
+
+    <div class="card">
+      <h2>4. Domain Results</h2>
+      <div class="table-wrap">
+        <table id="domainTable">
+          <thead><tr><th>Domain</th><th>Score</th><th>Band</th><th>Interpretation</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2">
+      <div class="card">
+        <h2>5. Strength Analysis</h2>
+        <ul id="strengthsList"></ul>
+      </div>
+      <div class="card">
+        <h2>6. Development Analysis</h2>
+        <ul id="developmentList"></ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>7. Recommendations</h2>
+      <div id="recommendationsList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Limitations</h2>
+      <ul id="limitationsList" class="muted"></ul>
+    </div>
+
+    <p class="muted" style="text-align:center;">
+      This report does not diagnose any condition and does not label this participant's overall worth, intelligence,
+      or future potential. It reflects performance on a specific, pilot-stage question set under specific
+      conditions, reviewed by an authorised professional — see Limitations above.
+    </p>
+  </div>
+</div>
+
+<footer class="site-footer no-print">
+  <div>© 2026 Auzentis Private Limited. All rights reserved.</div>
+  <div><a href="https://auzentis.com" target="_blank" rel="noopener">auzentis.com</a> · Pilot build</div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script>
+const BAND_CLASS = { strong: "approved", developing: "pending", needs_focus: "rejected" };
+
+(async () => {
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  if (!sessionData?.session) { window.location.href = "index.html"; return; }
+
+  const params = new URLSearchParams(window.location.search);
+  const reportId = params.get("report_id");
+  if (!reportId) {
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("notFound").style.display = "block";
+    return;
+  }
+
+  const { data: report, error } = await supabaseClient
+    .from("reports")
+    .select("status, approved_at, snapshot_json")
+    .eq("id", reportId)
+    .eq("status", "approved")
+    .single();
+
+  document.getElementById("loading").style.display = "none";
+  if (error || !report) {
+    document.getElementById("notFound").style.display = "block";
+    return;
+  }
+
+  const c = report.snapshot_json;
+  document.getElementById("reportBody").style.display = "block";
+  document.getElementById("reportGeneratedAt").textContent = `Approved ${new Date(report.approved_at).toLocaleString()}`;
+
+  document.getElementById("pName").textContent = c.participant_name || "—";
+  document.getElementById("pAgeBand").textContent = c.age_band_code || "—";
+  document.getElementById("pAssessment").textContent = c.assessment_title || "—";
+  document.getElementById("pDate").textContent = c.started_at ? new Date(c.started_at).toLocaleDateString() : "—";
+
+  document.getElementById("oDomains").textContent = (c.domain_sections || []).map((d) => d.domain).join(", ") || "—";
+  document.getElementById("oTime").textContent = c.time_taken_seconds ? `${Math.round(c.time_taken_seconds / 60)} min` : "—";
+  document.getElementById("oAccuracy").textContent = c.overall_accuracy != null ? `${c.overall_accuracy}%` : "—";
+
+  document.getElementById("execSummary").textContent = c.executive_summary || "—";
+
+  const tbody = document.querySelector("#domainTable tbody");
+  for (const d of c.domain_sections || []) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${d.domain}</td><td>${d.score}% (${d.correct_count}/${d.total_count})</td>
+      <td><span class="badge ${BAND_CLASS[d.band] || "draft"}">${d.band_label}</span></td><td>${d.summary}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  const strengthsList = document.getElementById("strengthsList");
+  strengthsList.innerHTML = (c.strengths || []).length
+    ? c.strengths.map((s) => `<li>${s}</li>`).join("")
+    : `<li class="muted">No domain reached the "Strong" band this session.</li>`;
+
+  const developmentList = document.getElementById("developmentList");
+  developmentList.innerHTML = (c.development_areas || []).length
+    ? c.development_areas.map((s) => `<li>${s}</li>`).join("")
+    : `<li class="muted">No specific development area flagged this session.</li>`;
+
+  const recs = document.getElementById("recommendationsList");
+  recs.innerHTML = (c.domain_sections || [])
+    .map((d) => `<div class="question-block"><strong>${d.domain}</strong><p class="muted" style="margin:4px 0 0;">${d.recommendation}</p></div>`)
+    .join("");
+
+  document.getElementById("limitationsList").innerHTML = (c.limitations || []).map((l) => `<li>${l}</li>`).join("");
+})();
+</script>
+</body>
+</html>
