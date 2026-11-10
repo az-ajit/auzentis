@@ -4,46 +4,97 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin — Auzentis Institute</title>
+<link rel="icon" type="image/png" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="css/institute.css">
 </head>
 <body>
 
-<div class="topbar">
-  <div class="brand">Auzentis Institute — Admin</div>
-  <a href="dashboard.html" class="muted">Dashboard</a>
-</div>
+<header class="site-header">
+  <div class="brand">
+    <img src="../assets/icon_trimmed.png" alt="Auzentis">
+    <div class="brand-text">Auzentis <span>Institute</span></div>
+  </div>
+  <nav class="site-nav">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="register.html">Register Participant</a>
+    <a href="admin.html" class="active">Admin</a>
+  </nav>
+  <div class="header-right">
+    <span class="role-chip" id="roleChip" style="display:none;"></span>
+    <a href="#" id="signOutLink">Sign out</a>
+  </div>
+</header>
 
-<div class="wrap">
-  <div id="forbidden" class="notice" style="display:none;">
+<div class="page">
+  <div id="forbidden" class="notice error" style="display:none;">
     This page is restricted to Super Administrator, Assessment Administrator, or Psychologist roles.
   </div>
 
   <div id="adminContent" style="display:none;">
+    <div class="page-header">
+      <h1>Admin</h1>
+      <p>Question-bank validation review and session approval queue.</p>
+    </div>
+
+    <div class="grid grid-cols-4" id="statTiles"></div>
+
+    <div class="grid grid-cols-2" style="align-items:start;">
+      <div class="card">
+        <h2>Validation status distribution</h2>
+        <div class="chart-wrap"><canvas id="statusChart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>About this queue</h2>
+        <p class="muted">Promote a question's status only after an independent reviewer has actually reviewed it —
+          see QUESTION_BANK_DESIGN.md. Nothing here fabricates review evidence; this just records the status change.</p>
+        <p class="muted">A report cannot reach a participant/guardian until a Psychologist (or Super Admin, for the
+          pilot) approves it in the queue below.</p>
+      </div>
+    </div>
+
     <div class="card">
-      <h1>Question bank — validation review queue</h1>
-      <p class="muted">Promote a question's status only after an independent reviewer has actually reviewed it —
-        see QUESTION_BANK_DESIGN.md. Nothing here fabricates review evidence; this just records the status change.</p>
-      <table id="questionsTable">
-        <thead><tr><th>Code</th><th>Domain</th><th>Age band</th><th>Status</th><th>Test data?</th><th>Action</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <h2>Question bank — validation review queue</h2>
+      <div class="table-wrap">
+        <table id="questionsTable">
+          <thead><tr><th>Code</th><th>Domain</th><th>Age band</th><th>Status</th><th>Test data?</th><th>Action</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="questionsPagination"></div>
     </div>
 
     <div class="card">
       <h2>Sessions awaiting professional review</h2>
-      <p class="muted">A report cannot reach a participant/guardian until a Psychologist approves it here.</p>
-      <table id="reviewTable">
-        <thead><tr><th>Participant</th><th>Assessment</th><th>Accuracy</th><th>Action</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <div class="table-wrap">
+        <table id="reviewTable">
+          <thead><tr><th>Participant</th><th>Assessment</th><th>Accuracy</th><th>Action</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="reviewPagination"></div>
     </div>
   </div>
 </div>
 
+<footer class="site-footer">
+  <div>© 2026 Auzentis Private Limited. All rights reserved.</div>
+  <div><a href="https://auzentis.com" target="_blank" rel="noopener">auzentis.com</a> · Pilot build</div>
+</footer>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="js/supabase-client.js"></script>
+<script src="js/paginate.js"></script>
 <script>
 let myRole = null;
+const STATUS_OPTIONS = ["draft", "expert_reviewed", "pilot_ready", "pilot_tested", "under_validation", "validated", "suspended", "retired"];
+const STATUS_COLORS = { draft: "#9aa3b2", expert_reviewed: "#5b8dff", pilot_ready: "#0747eb", pilot_tested: "#0537b8",
+  under_validation: "#c08a2e", validated: "#15803d", suspended: "#b45309", retired: "#b42318" };
+
+function statTile(label, value) {
+  return `<div class="stat-tile"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`;
+}
 
 async function init() {
   const { data: sessionData } = await supabaseClient.auth.getSession();
@@ -56,13 +107,13 @@ async function init() {
     document.getElementById("forbidden").style.display = "block";
     return;
   }
+  document.getElementById("roleChip").textContent = myRole.replace("_", " ");
+  document.getElementById("roleChip").style.display = "inline-block";
   document.getElementById("adminContent").style.display = "block";
 
   await loadQuestions();
   await loadReviewQueue();
 }
-
-const STATUS_OPTIONS = ["draft", "expert_reviewed", "pilot_ready", "pilot_tested", "under_validation", "validated", "suspended", "retired"];
 
 async function loadQuestions() {
   const { data: questions, error } = await supabaseClient
@@ -70,23 +121,46 @@ async function loadQuestions() {
     .select("id, code, age_band_code, validation_status, is_test_data, assessment_domains(name)")
     .order("code");
 
-  if (error) { document.querySelector("#questionsTable tbody").innerHTML = `<tr><td colspan="6">${error.message}</td></tr>`; return; }
-
-  const tbody = document.querySelector("#questionsTable tbody");
-  tbody.innerHTML = "";
-  for (const q of questions || []) {
-    const tr = document.createElement("tr");
-    const options = STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === q.validation_status ? "selected" : ""}>${s}</option>`).join("");
-    tr.innerHTML = `
-      <td>${q.code}</td>
-      <td>${q.assessment_domains?.name || "—"}</td>
-      <td>${q.age_band_code}</td>
-      <td><select data-id="${q.id}" class="statusSelect">${options}</select></td>
-      <td>${q.is_test_data ? '<span class="badge pending">test only</span>' : ""}</td>
-      <td><button class="secondary saveStatusBtn" data-id="${q.id}">Save</button></td>
-    `;
-    tbody.appendChild(tr);
+  if (error) {
+    document.querySelector("#questionsTable tbody").innerHTML = `<tr><td colspan="6">${error.message}</td></tr>`;
+    return;
   }
+
+  const counts = {};
+  for (const q of questions || []) counts[q.validation_status] = (counts[q.validation_status] || 0) + 1;
+
+  document.getElementById("statTiles").innerHTML =
+    statTile("Total questions", questions?.length || 0) +
+    statTile("Draft", counts.draft || 0) +
+    statTile("Pilot ready+", (counts.pilot_ready || 0) + (counts.pilot_tested || 0) + (counts.validated || 0)) +
+    statTile("Validated", counts.validated || 0);
+
+  new Chart(document.getElementById("statusChart"), {
+    type: "doughnut",
+    data: {
+      labels: Object.keys(counts),
+      datasets: [{ data: Object.values(counts), backgroundColor: Object.keys(counts).map((k) => STATUS_COLORS[k] || "#ccc") }],
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "right", labels: { boxWidth: 12, font: { size: 11 } } } } },
+  });
+
+  renderPaginated({
+    rows: questions || [],
+    pageSize: 10,
+    tbodyEl: document.querySelector("#questionsTable tbody"),
+    paginationEl: document.getElementById("questionsPagination"),
+    rowHtml: (q) => {
+      const options = STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === q.validation_status ? "selected" : ""}>${s}</option>`).join("");
+      return `<tr>
+        <td>${q.code}</td>
+        <td>${q.assessment_domains?.name || "—"}</td>
+        <td>${q.age_band_code}</td>
+        <td><select data-id="${q.id}" class="statusSelect">${options}</select></td>
+        <td>${q.is_test_data ? '<span class="badge pending">test only</span>' : ""}</td>
+        <td><button class="secondary small saveStatusBtn" data-id="${q.id}">Save</button></td>
+      </tr>`;
+    },
+  });
 
   document.querySelectorAll(".saveStatusBtn").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -105,23 +179,30 @@ async function loadReviewQueue() {
     .select("id, participant_id, status, participants(full_name), assessments(title), scores(accuracy_pct, id), reports(id, status)")
     .eq("status", "completed");
 
-  const tbody = document.querySelector("#reviewTable tbody");
-  tbody.innerHTML = "";
-  if (error) { tbody.innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`; return; }
-
-  for (const s of sessions || []) {
-    if (s.reports && s.reports.length && s.reports[0].status === "approved") continue; // already done
-    const tr = document.createElement("tr");
-    const accuracy = s.scores?.[0]?.accuracy_pct ?? "—";
-    const canApprove = myRole === "psychologist" || myRole === "super_admin";
-    tr.innerHTML = `
-      <td>${s.participants?.full_name || "—"}</td>
-      <td>${s.assessments?.title || "—"}</td>
-      <td>${accuracy}%</td>
-      <td>${canApprove ? `<button class="approveBtn" data-session="${s.id}">Approve & generate report</button>` : '<span class="muted">Psychologist only</span>'}</td>
-    `;
-    tbody.appendChild(tr);
+  if (error) {
+    document.querySelector("#reviewTable tbody").innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`;
+    return;
   }
+
+  const pending = (sessions || []).filter((s) => !(s.reports && s.reports.length && s.reports[0].status === "approved"));
+  const canApprove = myRole === "psychologist" || myRole === "super_admin";
+
+  renderPaginated({
+    rows: pending,
+    pageSize: 10,
+    tbodyEl: document.querySelector("#reviewTable tbody"),
+    paginationEl: document.getElementById("reviewPagination"),
+    emptyMessage: "Nothing awaiting review right now.",
+    rowHtml: (s) => {
+      const accuracy = s.scores?.[0]?.accuracy_pct ?? "—";
+      return `<tr>
+        <td>${s.participants?.full_name || "—"}</td>
+        <td>${s.assessments?.title || "—"}</td>
+        <td>${accuracy}${accuracy !== "—" ? "%" : ""}</td>
+        <td>${canApprove ? `<button class="small approveBtn" data-session="${s.id}">Approve & generate report</button>` : '<span class="muted">Psychologist only</span>'}</td>
+      </tr>`;
+    },
+  });
 
   document.querySelectorAll(".approveBtn").forEach((btn) => {
     btn.addEventListener("click", () => approveSession(btn.dataset.session, btn));
@@ -154,8 +235,14 @@ async function approveSession(sessionId, btn) {
   });
   if (reportErr) { alert(reportErr.message); btn.disabled = false; return; }
 
-  btn.closest("tr").remove();
+  await loadReviewQueue();
 }
+
+document.getElementById("signOutLink").addEventListener("click", async (e) => {
+  e.preventDefault();
+  await supabaseClient.auth.signOut();
+  window.location.href = "index.html";
+});
 
 init();
 </script>

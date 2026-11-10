@@ -3,58 +3,53 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Auzentis Institute — Human Potential Assessment</title>
+<title>Auzentis Institute — Sign In</title>
 <meta name="description" content="AI-assisted human potential assessment, training and development — pilot programme.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="css/institute.css">
 </head>
 <body>
 
-<div class="topbar">
-  <div class="brand">Auzentis Institute</div>
-  <div class="muted">Human Potential Assessment — Pilot</div>
-</div>
-
-<div class="wrap">
-  <div class="notice">
-    <strong>Pilot programme.</strong> This platform currently covers ages 6–25 across seven foundational domains
-    (Numerical, Verbal, Logical, Memory, Attention, Problem-Solving, Learning Preference). Results are explained in
-    plain language with stated limitations — no score here labels a person's worth or future potential on its own.
+<div class="page-narrow">
+  <div class="notice" style="text-align:center;">
+    <strong>Pilot programme.</strong> Ages 6–25 across seven foundational domains — Numerical, Verbal, Logical,
+    Memory, Attention, Problem-Solving, and Learning Preference.
   </div>
 
-  <div class="card">
-    <h1>Sign in</h1>
-    <p class="muted">Participants aged 18+ sign in directly. A parent/guardian signs in to register and manage an
-      under-18 participant.</p>
-    <label for="email">Email</label>
-    <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
-    <label for="password">Password</label>
-    <input id="password" type="password" autocomplete="current-password">
-    <div id="authError" class="muted" style="color:var(--red);display:none;"></div>
-    <button id="signInBtn">Sign in</button>
+  <div class="card" style="text-align:center;">
+    <img src="../assets/icon_trimmed.png" alt="Auzentis" style="height:48px;width:48px;margin-bottom:6px;">
+    <div style="font-weight:800;font-size:18px;color:var(--navy);letter-spacing:0.02em;margin-bottom:18px;">AUZENTIS INSTITUTE</div>
 
-    <div style="margin-top:22px;border-top:1px solid var(--border);padding-top:16px;">
-      <p class="muted" style="margin:0 0 8px;">New here? Choose who this account is for, then create it:</p>
-      <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;">
+    <h2 style="text-align:left;">Sign In</h2>
+    <div style="text-align:left;">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="email" placeholder="you@auzentis.com">
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="At least 8 characters">
+    </div>
+    <div id="authError" class="notice error" style="display:none;text-align:left;margin-top:14px;"></div>
+    <button id="signInBtn" style="width:100%;justify-content:center;">Sign In</button>
+
+    <div style="margin-top:22px;border-top:1px solid var(--border);padding-top:16px;text-align:left;">
+      <p class="muted" style="margin:0 0 10px;">New here? Choose who this account is for:</p>
+      <label style="display:flex;align-items:center;gap:8px;font-weight:400;font-size:13px;color:var(--text);">
         <input type="radio" name="accountFor" value="self" style="width:auto;" checked> I am 18 or older, registering myself
       </label>
-      <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin-top:6px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:400;font-size:13px;color:var(--text);margin-top:6px;">
         <input type="radio" name="accountFor" value="guardian" style="width:auto;"> I am a parent/guardian registering a child
       </label>
-      <button id="signUpBtn" class="secondary">Create an account</button>
+      <button id="signUpBtn" class="secondary" style="width:100%;justify-content:center;">Create an account</button>
     </div>
   </div>
 
-  <div class="card">
-    <h2>Roles</h2>
-    <p class="muted">New accounts default to <strong>Parent/Guardian</strong> or <strong>Participant (18+)</strong>.
-      Assessment Administrator and Psychologist accounts are provisioned separately by a Super Administrator — see
-      <a href="admin.html">admin.html</a> once you have that role.</p>
-  </div>
+  <p class="muted" style="text-align:center;">
+    New accounts default to <strong>Parent/Guardian</strong> or <strong>Participant (18+)</strong>. Assessment
+    Administrator and Psychologist roles are provisioned separately by a Super Administrator.
+  </p>
 </div>
 
-<footer>Auzentis Institute · Pilot build · No diagnosis or clinical conclusion is made by this platform.</footer>
+<footer class="simple-footer">© 2026 Auzentis Private Limited. All rights reserved. · No diagnosis or clinical conclusion is made by this platform.</footer>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/supabase-client.js"></script>
@@ -65,9 +60,10 @@ async function redirectIfSignedIn() {
 }
 redirectIfSignedIn();
 
-function showError(msg) {
+function showError(msg, isSuccess) {
   const el = document.getElementById("authError");
   el.textContent = msg;
+  el.className = isSuccess ? "notice success" : "notice error";
   el.style.display = "block";
 }
 
@@ -107,20 +103,12 @@ document.getElementById("signUpBtn").addEventListener("click", async () => {
   if (error) return showError(error.message);
 
   if (data.session) {
-    // Email confirmation is off for this project — we're signed in immediately.
     await ensureProfile(data.user);
     window.location.href = `register.html?for=${accountFor}`;
     return;
   }
 
-  // Email confirmation is required: no session yet. Don't attempt any DB write
-  // (it would fail — there's no authenticated session to satisfy RLS). Tell
-  // the participant/guardian to confirm, then come back and sign in — signing
-  // in is what actually creates the profile row (see ensureProfile above).
-  const el = document.getElementById("authError");
-  el.style.color = "var(--green)";
-  el.textContent = "Account created. Check your email for a confirmation link, then come back and sign in.";
-  el.style.display = "block";
+  showError("Account created. Check your email for a confirmation link, then come back and sign in.", true);
 });
 </script>
 </body>

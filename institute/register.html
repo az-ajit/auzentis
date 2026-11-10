@@ -3,31 +3,45 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Register — Auzentis Institute</title>
+<title>Register Participant — Auzentis Institute</title>
+<link rel="icon" type="image/png" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="css/institute.css">
 </head>
 <body>
 
-<div class="topbar">
-  <div class="brand">Auzentis Institute</div>
-  <a href="dashboard.html" class="muted">Dashboard</a>
-</div>
+<header class="site-header">
+  <div class="brand">
+    <img src="../assets/icon_trimmed.png" alt="Auzentis">
+    <div class="brand-text">Auzentis <span>Institute</span></div>
+  </div>
+  <nav class="site-nav">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="register.html" class="active">Register Participant</a>
+    <a href="admin.html" id="adminNavLink" style="display:none;">Admin</a>
+  </nav>
+  <div class="header-right">
+    <a href="#" id="signOutLink">Sign out</a>
+  </div>
+</header>
 
-<div class="wrap">
+<div class="page" style="max-width:640px;">
+  <div class="page-header">
+    <h1>Register a participant</h1>
+    <p>Only the pilot age range (6–25) is currently supported. Ages 3–5 and 61+ require accessibility features not
+      yet built.</p>
+  </div>
+
+  <div id="notSignedIn" class="notice" style="display:none;">You need to sign in first. <a href="index.html">Go to sign in</a>.</div>
+
   <div class="card">
-    <h1 id="formTitle">Register a participant</h1>
-    <p class="muted" id="formSubtitle">Only the pilot age range (6–25) is currently supported. Ages 3–5 and 61+
-      require accessibility features not yet built.</p>
-
-    <div id="notSignedIn" class="notice" style="display:none;">You need to sign in first. <a href="index.html">Go to sign in</a>.</div>
-
     <form id="registerForm">
       <label for="fullName">Participant full name</label>
       <input id="fullName" required>
 
       <label for="dob">Date of birth</label>
       <input id="dob" type="date" required>
-      <p class="muted" id="ageBandPreview"></p>
+      <p class="muted" id="ageBandPreview" style="margin-top:6px;"></p>
 
       <label for="language">Language</label>
       <select id="language">
@@ -35,26 +49,31 @@
       </select>
 
       <div id="consentBlock">
-        <label style="margin-top:22px;">
-          <input type="checkbox" id="consentCheck" style="width:auto;">
-          I confirm I am the parent/guardian of this participant and consent to their assessment data being
-          collected and used solely for personal development reporting, as described in the privacy notice.
+        <label style="display:flex;align-items:flex-start;gap:8px;margin-top:20px;font-weight:400;font-size:13px;color:var(--text);">
+          <input type="checkbox" id="consentCheck" style="width:auto;margin-top:2px;">
+          <span>I confirm I am the parent/guardian of this participant and consent to their assessment data being
+          collected and used solely for personal development reporting, as described in the privacy notice.</span>
         </label>
       </div>
 
       <div id="selfConsentBlock" style="display:none;">
-        <label style="margin-top:22px;">
-          <input type="checkbox" id="selfConsentCheck" style="width:auto;">
-          I confirm I am 18 or older and consent to my own assessment data being collected and used solely for
-          personal development reporting, as described in the privacy notice.
+        <label style="display:flex;align-items:flex-start;gap:8px;margin-top:20px;font-weight:400;font-size:13px;color:var(--text);">
+          <input type="checkbox" id="selfConsentCheck" style="width:auto;margin-top:2px;">
+          <span>I confirm I am 18 or older and consent to my own assessment data being collected and used solely for
+          personal development reporting, as described in the privacy notice.</span>
         </label>
       </div>
 
-      <div id="registerError" class="muted" style="color:var(--red);display:none;"></div>
+      <div id="registerError" class="notice error" style="display:none;"></div>
       <button type="submit">Register</button>
     </form>
   </div>
 </div>
+
+<footer class="site-footer">
+  <div>© 2026 Auzentis Private Limited. All rights reserved.</div>
+  <div><a href="https://auzentis.com" target="_blank" rel="noopener">auzentis.com</a> · Pilot build</div>
+</footer>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/supabase-client.js"></script>
@@ -68,19 +87,29 @@ let currentUser = null;
   const { data } = await supabaseClient.auth.getSession();
   if (!data?.session) {
     document.getElementById("notSignedIn").style.display = "block";
-    document.getElementById("registerForm").style.display = "none";
+    document.getElementById("registerForm").closest(".card").style.display = "none";
     return;
   }
   currentUser = data.session.user;
 
+  const { data: profile } = await supabaseClient.from("profiles").select("role").eq("id", currentUser.id).single();
+  if (profile && ["super_admin", "assessment_admin", "psychologist"].includes(profile.role)) {
+    document.getElementById("adminNavLink").style.display = "inline";
+  }
+
   if (forWhom === "self") {
-    document.getElementById("formTitle").textContent = "Register yourself";
-    document.getElementById("formSubtitle").textContent = "Self-registration is only available for ages 18-25 in this pilot.";
-    document.getElementById("fullName").value = "";
+    document.querySelector(".page-header h1").textContent = "Register yourself";
+    document.querySelector(".page-header p").textContent = "Self-registration is only available for ages 18-25 in this pilot.";
     document.getElementById("consentBlock").style.display = "none";
     document.getElementById("selfConsentBlock").style.display = "block";
   }
 })();
+
+document.getElementById("signOutLink").addEventListener("click", async (e) => {
+  e.preventDefault();
+  await supabaseClient.auth.signOut();
+  window.location.href = "index.html";
+});
 
 document.getElementById("dob").addEventListener("change", (e) => {
   const band = ageBandForDob(e.target.value);
@@ -90,8 +119,7 @@ document.getElementById("dob").addEventListener("change", (e) => {
     return;
   }
   const inPilot = PILOT_AGE_BAND_CODES.includes(band.code);
-  preview.textContent = `Age band: ${band.label} ${inPilot ? "(pilot-supported)" : "(not yet supported in the pilot)"}`;
-  preview.style.color = inPilot ? "var(--green)" : "var(--red)";
+  preview.innerHTML = `Age band: <strong>${band.label}</strong> ${inPilot ? '<span class="badge pilot">pilot-supported</span>' : '<span class="badge rejected">not yet supported</span>'}`;
 });
 
 function showError(msg) {

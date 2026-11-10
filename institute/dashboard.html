@@ -4,39 +4,77 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard — Auzentis Institute</title>
+<link rel="icon" type="image/png" href="../assets/favicon-32.png">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="css/institute.css">
 </head>
 <body>
 
-<div class="topbar">
-  <div class="brand">Auzentis Institute</div>
-  <div>
-    <a href="admin.html" class="muted" id="adminLink" style="display:none;margin-right:16px;">Admin</a>
-    <a href="#" class="muted" id="signOutLink">Sign out</a>
+<header class="site-header">
+  <div class="brand">
+    <img src="../assets/icon_trimmed.png" alt="Auzentis">
+    <div class="brand-text">Auzentis <span>Institute</span></div>
   </div>
-</div>
+  <nav class="site-nav">
+    <a href="dashboard.html" class="active">Dashboard</a>
+    <a href="register.html">Register Participant</a>
+    <a href="admin.html" id="adminNavLink" style="display:none;">Admin</a>
+  </nav>
+  <div class="header-right">
+    <span class="role-chip" id="roleChip" style="display:none;"></span>
+    <a href="#" id="signOutLink">Sign out</a>
+  </div>
+</header>
 
-<div class="wrap">
-  <div class="card">
-    <h1>Participants</h1>
-    <p class="muted">Each participant can take the Pilot Basic Assessment for their age band once it has reviewed
-      content available.</p>
-    <div id="participantsList"></div>
-    <a href="register.html" class="btn secondary">Register another participant</a>
+<div class="page">
+  <div class="page-header">
+    <h1>Dashboard</h1>
+    <p>Your registered participants, their assessment progress, and domain performance.</p>
+  </div>
+
+  <div class="grid grid-cols-4" id="statTiles"></div>
+
+  <div class="grid grid-cols-2" style="align-items:start;margin-top:4px;">
+    <div class="card">
+      <h2>Participants</h2>
+      <p class="muted">Each participant can take the Pilot Basic Assessment for their age band once reviewed content is available.</p>
+      <div id="participantsList"></div>
+      <a href="register.html" class="btn secondary">Register another participant</a>
+    </div>
+
+    <div class="card">
+      <h2>Average domain performance</h2>
+      <p class="muted">Across all completed, scored sessions for your participants.</p>
+      <div class="chart-wrap"><canvas id="domainChart"></canvas></div>
+    </div>
   </div>
 
   <div class="card">
     <h2>Past sessions</h2>
-    <table id="sessionsTable">
-      <thead><tr><th>Participant</th><th>Assessment</th><th>Status</th><th>Accuracy</th><th>Report</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    <div class="table-wrap">
+      <table id="sessionsTable">
+        <thead><tr><th>Participant</th><th>Assessment</th><th>Status</th><th>Accuracy</th><th>Report</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="sessionsPagination"></div>
   </div>
 </div>
 
+<footer class="site-footer">
+  <div>© 2026 Auzentis Private Limited. All rights reserved.</div>
+  <div><a href="https://auzentis.com" target="_blank" rel="noopener">auzentis.com</a> · Pilot build</div>
+</footer>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="js/supabase-client.js"></script>
+<script src="js/paginate.js"></script>
 <script>
+function statTile(label, value) {
+  return `<div class="stat-tile"><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div>`;
+}
+
 (async () => {
   const { data: sessionData } = await supabaseClient.auth.getSession();
   if (!sessionData?.session) {
@@ -46,8 +84,12 @@
   const user = sessionData.session.user;
 
   const { data: profile } = await supabaseClient.from("profiles").select("role").eq("id", user.id).single();
-  if (profile && ["super_admin", "assessment_admin", "psychologist"].includes(profile.role)) {
-    document.getElementById("adminLink").style.display = "inline";
+  if (profile) {
+    document.getElementById("roleChip").textContent = profile.role.replace("_", " ");
+    document.getElementById("roleChip").style.display = "inline-block";
+    if (["super_admin", "assessment_admin", "psychologist"].includes(profile.role)) {
+      document.getElementById("adminNavLink").style.display = "inline";
+    }
   }
 
   const { data: participants } = await supabaseClient
@@ -64,31 +106,87 @@
         const code = `pilot_basic_${p.age_band_code.toLowerCase()}`;
         return `<div class="question-block">
           <strong>${p.full_name}</strong> <span class="badge pilot">${p.age_band_code}</span>
-          <div><a class="btn" href="assessment.html?assessment=${code}&participant=${p.id}">Start Pilot Basic Assessment</a></div>
+          <div><a class="btn small" href="assessment.html?assessment=${code}&participant=${p.id}">Start Pilot Basic Assessment</a></div>
         </div>`;
       })
       .join("");
   }
 
   const participantIds = (participants || []).map((p) => p.id);
+  let sessions = [];
+  let domainAverages = {};
+
   if (participantIds.length) {
-    const { data: sessions } = await supabaseClient
+    const { data: sessionsData } = await supabaseClient
       .from("assessment_sessions")
-      .select("id, status, participant_id, assessments(title), scores(accuracy_pct), reports(status)")
+      .select("id, status, participant_id, assessments(title), scores(id, accuracy_pct), reports(status)")
       .in("participant_id", participantIds)
       .order("started_at", { ascending: false });
+    sessions = sessionsData || [];
 
-    const tbody = document.querySelector("#sessionsTable tbody");
-    const nameById = Object.fromEntries((participants || []).map((p) => [p.id, p.full_name]));
-    for (const s of sessions || []) {
-      const tr = document.createElement("tr");
-      const accuracy = s.scores?.[0]?.accuracy_pct ?? "—";
-      const reportStatus = s.reports?.[0]?.status ?? "not yet generated";
-      tr.innerHTML = `<td>${nameById[s.participant_id] || "—"}</td><td>${s.assessments?.title || "—"}</td>
-        <td>${s.status}</td><td>${accuracy}${accuracy !== "—" ? "%" : ""}</td><td>${reportStatus}</td>`;
-      tbody.appendChild(tr);
+    const scoreIds = sessions.map((s) => s.scores?.[0]?.id).filter(Boolean);
+    if (scoreIds.length) {
+      const { data: domainResults } = await supabaseClient
+        .from("domain_results")
+        .select("domain_id, domain_score, assessment_domains(name)")
+        .in("score_id", scoreIds);
+
+      const sums = {};
+      for (const d of domainResults || []) {
+        const name = d.assessment_domains?.name || d.domain_id;
+        sums[name] = sums[name] || { total: 0, count: 0 };
+        sums[name].total += d.domain_score;
+        sums[name].count += 1;
+      }
+      for (const name in sums) domainAverages[name] = Math.round((sums[name].total / sums[name].count) * 10) / 10;
     }
   }
+
+  const completed = sessions.filter((s) => s.status === "completed").length;
+  const pendingReports = sessions.filter((s) => s.status === "completed" && !(s.reports?.length)).length;
+  document.getElementById("statTiles").innerHTML =
+    statTile("Participants", participants?.length || 0) +
+    statTile("Sessions completed", completed) +
+    statTile("Reports pending review", pendingReports) +
+    statTile("Reports approved", sessions.filter((s) => s.reports?.[0]?.status === "approved").length);
+
+  const domainLabels = Object.keys(domainAverages);
+  new Chart(document.getElementById("domainChart"), {
+    type: "bar",
+    data: {
+      labels: domainLabels.length ? domainLabels : ["No scored sessions yet"],
+      datasets: [{
+        label: "Average accuracy %",
+        data: domainLabels.length ? domainLabels.map((k) => domainAverages[k]) : [0],
+        backgroundColor: "#0747eb",
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, max: 100, ticks: { callback: (v) => v + "%" } } },
+    },
+  });
+
+  const nameById = Object.fromEntries((participants || []).map((p) => [p.id, p.full_name]));
+  renderPaginated({
+    rows: sessions,
+    pageSize: 8,
+    tbodyEl: document.querySelector("#sessionsTable tbody"),
+    paginationEl: document.getElementById("sessionsPagination"),
+    emptyMessage: "No sessions yet — register a participant and start an assessment.",
+    rowHtml: (s) => {
+      const accuracy = s.scores?.[0]?.accuracy_pct;
+      const reportStatus = s.reports?.[0]?.status;
+      const reportBadge = reportStatus === "approved"
+        ? '<span class="badge approved">approved</span>'
+        : s.status === "completed" ? '<span class="badge pending">pending review</span>' : '<span class="badge draft">not yet</span>';
+      return `<tr><td>${nameById[s.participant_id] || "—"}</td><td>${s.assessments?.title || "—"}</td>
+        <td>${s.status}</td><td>${accuracy != null ? accuracy + "%" : "—"}</td><td>${reportBadge}</td></tr>`;
+    },
+  });
 })();
 
 document.getElementById("signOutLink").addEventListener("click", async (e) => {
