@@ -4,13 +4,11 @@
 // access control is enforced by Postgres Row Level Security
 // (auzentis_institute_supabase_schema.sql), never by hiding this key.
 //
-// SETUP REQUIRED: create a NEW, separate Supabase project for the Institute
-// (do not reuse Suite's project — see DECISIONS_AND_ASSUMPTIONS.md), then
-// replace the two placeholders below with that project's URL and anon key
-// (Project Settings -> API in the Supabase dashboard).
+// Points at the dedicated auzentis-institute Supabase project (separate from
+// Suite's project — see DECISIONS_AND_ASSUMPTIONS.md).
 
-const SUPABASE_URL = "https://YOUR-INSTITUTE-PROJECT.supabase.co"; // TODO: replace after creating the Supabase project
-const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY"; // TODO: replace — this is the public anon key, not the service role key
+const SUPABASE_URL = "https://friyodaoaamgcdzcagsn.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_7UKandmcQzFcGxyNU1julg_AEpOA_jZ";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
