@@ -80,7 +80,7 @@
 <script src="js/age-band.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
-const forWhom = params.get("for") || "guardian"; // "self" | "guardian"
+let forWhom = params.get("for"); // "self" | "guardian" | null (infer from role below)
 let currentUser = null;
 
 (async () => {
@@ -95,6 +95,13 @@ let currentUser = null;
   const { data: profile } = await supabaseClient.from("profiles").select("role").eq("id", currentUser.id).single();
   if (profile && ["super_admin", "assessment_admin", "psychologist"].includes(profile.role)) {
     document.getElementById("adminNavLink").style.display = "inline";
+  }
+
+  // No explicit ?for= param (e.g. arrived via the dashboard's "Register
+  // another participant" link rather than straight from signup) — infer
+  // from the account's own role instead of defaulting to guardian for everyone.
+  if (!forWhom) {
+    forWhom = profile?.role === "participant" ? "self" : "guardian";
   }
 
   if (forWhom === "self") {

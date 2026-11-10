@@ -53,6 +53,19 @@
       </div>
     </div>
 
+    <div class="card" id="approvalCard" style="display:none;">
+      <h2>Pending account approvals</h2>
+      <p class="muted">New accounts can't register participants or sign in to anything meaningful until approved —
+        same pattern as Auzentis Suite. Super Admin only.</p>
+      <div class="table-wrap">
+        <table id="approvalTable">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Requested</th><th>Action</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="approvalPagination"></div>
+    </div>
+
     <div class="card">
       <h2>Question bank — validation review queue</h2>
       <div class="table-wrap">
@@ -111,8 +124,49 @@ async function init() {
   document.getElementById("roleChip").style.display = "inline-block";
   document.getElementById("adminContent").style.display = "block";
 
+  if (myRole === "super_admin") {
+    document.getElementById("approvalCard").style.display = "block";
+    await loadPendingApprovals();
+  }
   await loadQuestions();
   await loadReviewQueue();
+}
+
+async function loadPendingApprovals() {
+  const { data: pending, error } = await supabaseClient
+    .from("profiles")
+    .select("id, full_name, email, role, created_at")
+    .eq("is_approved", false)
+    .order("created_at");
+
+  if (error) {
+    document.querySelector("#approvalTable tbody").innerHTML = `<tr><td colspan="5">${error.message}</td></tr>`;
+    return;
+  }
+
+  renderPaginated({
+    rows: pending || [],
+    pageSize: 10,
+    tbodyEl: document.querySelector("#approvalTable tbody"),
+    paginationEl: document.getElementById("approvalPagination"),
+    emptyMessage: "No accounts waiting for approval.",
+    rowHtml: (p) => `<tr>
+      <td>${p.full_name || "—"}</td>
+      <td>${p.email || "—"}</td>
+      <td><span class="badge pilot">${p.role.replace("_", " ")}</span></td>
+      <td>${new Date(p.created_at).toLocaleDateString()}</td>
+      <td><button class="small approveAccountBtn" data-id="${p.id}">Approve</button></td>
+    </tr>`,
+  });
+
+  document.querySelectorAll(".approveAccountBtn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      const { error } = await supabaseClient.from("profiles").update({ is_approved: true }).eq("id", btn.dataset.id);
+      if (error) { alert(error.message); btn.disabled = false; return; }
+      await loadPendingApprovals();
+    });
+  });
 }
 
 async function loadQuestions() {

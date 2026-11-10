@@ -68,13 +68,29 @@ function showError(msg, isSuccess) {
 }
 
 async function ensureProfile(user) {
-  const { data: existing } = await supabaseClient.from("profiles").select("id, role").eq("id", user.id).maybeSingle();
+  const { data: existing } = await supabaseClient.from("profiles").select("id, role, is_approved").eq("id", user.id).maybeSingle();
   if (existing) return existing;
   const accountFor = user.user_metadata?.account_for || "guardian";
   const role = accountFor === "self" ? "participant" : "parent";
-  const { data: created, error } = await supabaseClient.from("profiles").insert({ id: user.id, role }).select().single();
+  const { data: created, error } = await supabaseClient
+    .from("profiles")
+    .insert({ id: user.id, role, email: user.email })
+    .select()
+    .single();
   if (error) throw error;
   return created;
+}
+
+async function proceedIfApproved(profile) {
+  if (profile.is_approved) {
+    window.location.href = "dashboard.html";
+    return;
+  }
+  // Not approved yet: don't leave an active session sitting around for a
+  // pending account — sign back out and tell them to wait for approval,
+  // same pattern as Auzentis Suite.
+  await supabaseClient.auth.signOut();
+  showError("Your account has been created and is waiting for Super Administrator approval. You'll be able to sign in once it's approved.", true);
 }
 
 document.getElementById("signInBtn").addEventListener("click", async () => {
@@ -82,12 +98,13 @@ document.getElementById("signInBtn").addEventListener("click", async () => {
   const password = document.getElementById("password").value;
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error) return showError(error.message);
+  let profile;
   try {
-    await ensureProfile(data.user);
+    profile = await ensureProfile(data.user);
   } catch (e) {
     return showError(`Signed in, but could not set up your profile: ${e.message}`);
   }
-  window.location.href = "dashboard.html";
+  await proceedIfApproved(profile);
 });
 
 document.getElementById("signUpBtn").addEventListener("click", async () => {
@@ -103,8 +120,11 @@ document.getElementById("signUpBtn").addEventListener("click", async () => {
   if (error) return showError(error.message);
 
   if (data.session) {
-    await ensureProfile(data.user);
-    window.location.href = `register.html?for=${accountFor}`;
+    // Email confirmation is off for this project, so a session exists
+    // immediately — but the account still needs Super Admin approval before
+    // it can do anything real (see ensureProfile/proceedIfApproved).
+    const profile = await ensureProfile(data.user);
+    await proceedIfApproved(profile);
     return;
   }
 
