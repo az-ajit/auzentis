@@ -68,7 +68,9 @@ function showError(msg, isSuccess) {
 }
 
 async function ensureProfile(user) {
-  const { data: existing } = await supabaseClient.from("profiles").select("id, role, is_approved").eq("id", user.id).maybeSingle();
+  const { data: existing, error: lookupError } = await supabaseClient
+    .from("profiles").select("id, role, is_approved").eq("id", user.id).maybeSingle();
+  if (lookupError) throw lookupError;
   if (existing) return existing;
   const accountFor = user.user_metadata?.account_for || "guardian";
   const role = accountFor === "self" ? "participant" : "parent";
@@ -123,8 +125,12 @@ document.getElementById("signUpBtn").addEventListener("click", async () => {
     // Email confirmation is off for this project, so a session exists
     // immediately — but the account still needs Super Admin approval before
     // it can do anything real (see ensureProfile/proceedIfApproved).
-    const profile = await ensureProfile(data.user);
-    await proceedIfApproved(profile);
+    try {
+      const profile = await ensureProfile(data.user);
+      await proceedIfApproved(profile);
+    } catch (e) {
+      return showError(`Account created, but could not set up your profile: ${e.message}`);
+    }
     return;
   }
 
