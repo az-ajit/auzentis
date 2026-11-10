@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Register — Auzentis Institute</title>
+<link rel="stylesheet" href="css/institute.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Auzentis Institute</div>
+  <a href="dashboard.html" class="muted">Dashboard</a>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h1 id="formTitle">Register a participant</h1>
+    <p class="muted" id="formSubtitle">Only the pilot age range (6–25) is currently supported. Ages 3–5 and 61+
+      require accessibility features not yet built.</p>
+
+    <div id="notSignedIn" class="notice" style="display:none;">You need to sign in first. <a href="index.html">Go to sign in</a>.</div>
+
+    <form id="registerForm">
+      <label for="fullName">Participant full name</label>
+      <input id="fullName" required>
+
+      <label for="dob">Date of birth</label>
+      <input id="dob" type="date" required>
+      <p class="muted" id="ageBandPreview"></p>
+
+      <label for="language">Language</label>
+      <select id="language">
+        <option value="en">English</option>
+      </select>
+
+      <div id="consentBlock">
+        <label style="margin-top:22px;">
+          <input type="checkbox" id="consentCheck" style="width:auto;">
+          I confirm I am the parent/guardian of this participant and consent to their assessment data being
+          collected and used solely for personal development reporting, as described in the privacy notice.
+        </label>
+      </div>
+
+      <div id="selfConsentBlock" style="display:none;">
+        <label style="margin-top:22px;">
+          <input type="checkbox" id="selfConsentCheck" style="width:auto;">
+          I confirm I am 18 or older and consent to my own assessment data being collected and used solely for
+          personal development reporting, as described in the privacy notice.
+        </label>
+      </div>
+
+      <div id="registerError" class="muted" style="color:var(--red);display:none;"></div>
+      <button type="submit">Register</button>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script src="js/age-band.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const forWhom = params.get("for") || "guardian"; // "self" | "guardian"
+let currentUser = null;
+
+(async () => {
+  const { data } = await supabaseClient.auth.getSession();
+  if (!data?.session) {
+    document.getElementById("notSignedIn").style.display = "block";
+    document.getElementById("registerForm").style.display = "none";
+    return;
+  }
+  currentUser = data.session.user;
+
+  if (forWhom === "self") {
+    document.getElementById("formTitle").textContent = "Register yourself";
+    document.getElementById("formSubtitle").textContent = "Self-registration is only available for ages 18-25 in this pilot.";
+    document.getElementById("fullName").value = "";
+    document.getElementById("consentBlock").style.display = "none";
+    document.getElementById("selfConsentBlock").style.display = "block";
+  }
+})();
+
+document.getElementById("dob").addEventListener("change", (e) => {
+  const band = ageBandForDob(e.target.value);
+  const preview = document.getElementById("ageBandPreview");
+  if (!band) {
+    preview.textContent = "Could not determine an age band for this date of birth.";
+    return;
+  }
+  const inPilot = PILOT_AGE_BAND_CODES.includes(band.code);
+  preview.textContent = `Age band: ${band.label} ${inPilot ? "(pilot-supported)" : "(not yet supported in the pilot)"}`;
+  preview.style.color = inPilot ? "var(--green)" : "var(--red)";
+});
+
+function showError(msg) {
+  const el = document.getElementById("registerError");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+document.getElementById("registerForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fullName = document.getElementById("fullName").value.trim();
+  const dob = document.getElementById("dob").value;
+  const language = document.getElementById("language").value;
+  const band = ageBandForDob(dob);
+
+  if (!band || !PILOT_AGE_BAND_CODES.includes(band.code)) {
+    return showError("This participant's age band is not yet supported by the pilot (only ages 6-25 are supported right now).");
+  }
+
+  if (forWhom === "self") {
+    const age = ageFromDob(dob);
+    if (age < 18) return showError("Self-registration requires the participant to be 18 or older. Please use the parent/guardian registration flow instead.");
+    if (!document.getElementById("selfConsentCheck").checked) return showError("Please confirm consent to continue.");
+  } else {
+    if (!document.getElementById("consentCheck").checked) return showError("Please confirm guardian consent to continue.");
+  }
+
+  const participantPayload = {
+    full_name: fullName,
+    dob,
+    language,
+    user_id: forWhom === "self" ? currentUser.id : null,
+    guardian_profile_id: forWhom === "guardian" ? currentUser.id : null,
+  };
+
+  const { data: participant, error: pErr } = await supabaseClient
+    .from("participants")
+    .insert(participantPayload)
+    .select()
+    .single();
+
+  if (pErr) return showError(pErr.message);
+
+  const { error: cErr } = await supabaseClient.from("consent_records").insert({
+    participant_id: participant.id,
+    guardian_profile_id: forWhom === "guardian" ? currentUser.id : null,
+    purpose: "personal_development",
+    scope_json: { domains: ["numerical", "verbal", "logical", "memory", "attention", "problem_solving", "learning_pref"] },
+  });
+
+  if (cErr) return showError(cErr.message);
+
+  window.location.href = "dashboard.html";
+});
+</script>
+</body>
+</html>

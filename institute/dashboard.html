@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Auzentis Institute</title>
+<link rel="stylesheet" href="css/institute.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Auzentis Institute</div>
+  <div>
+    <a href="admin.html" class="muted" id="adminLink" style="display:none;margin-right:16px;">Admin</a>
+    <a href="#" class="muted" id="signOutLink">Sign out</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h1>Participants</h1>
+    <p class="muted">Each participant can take the Pilot Basic Assessment for their age band once it has reviewed
+      content available.</p>
+    <div id="participantsList"></div>
+    <a href="register.html" class="btn secondary">Register another participant</a>
+  </div>
+
+  <div class="card">
+    <h2>Past sessions</h2>
+    <table id="sessionsTable">
+      <thead><tr><th>Participant</th><th>Assessment</th><th>Status</th><th>Accuracy</th><th>Report</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script>
+(async () => {
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  if (!sessionData?.session) {
+    window.location.href = "index.html";
+    return;
+  }
+  const user = sessionData.session.user;
+
+  const { data: profile } = await supabaseClient.from("profiles").select("role").eq("id", user.id).single();
+  if (profile && ["super_admin", "assessment_admin", "psychologist"].includes(profile.role)) {
+    document.getElementById("adminLink").style.display = "inline";
+  }
+
+  const { data: participants } = await supabaseClient
+    .from("participants")
+    .select("id, full_name, age_band_code")
+    .or(`user_id.eq.${user.id},guardian_profile_id.eq.${user.id}`);
+
+  const listEl = document.getElementById("participantsList");
+  if (!participants || participants.length === 0) {
+    listEl.innerHTML = `<p class="muted">No participants registered yet.</p>`;
+  } else {
+    listEl.innerHTML = participants
+      .map((p) => {
+        const code = `pilot_basic_${p.age_band_code.toLowerCase()}`;
+        return `<div class="question-block">
+          <strong>${p.full_name}</strong> <span class="badge pilot">${p.age_band_code}</span>
+          <div><a class="btn" href="assessment.html?assessment=${code}&participant=${p.id}">Start Pilot Basic Assessment</a></div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  const participantIds = (participants || []).map((p) => p.id);
+  if (participantIds.length) {
+    const { data: sessions } = await supabaseClient
+      .from("assessment_sessions")
+      .select("id, status, participant_id, assessments(title), scores(accuracy_pct), reports(status)")
+      .in("participant_id", participantIds)
+      .order("started_at", { ascending: false });
+
+    const tbody = document.querySelector("#sessionsTable tbody");
+    const nameById = Object.fromEntries((participants || []).map((p) => [p.id, p.full_name]));
+    for (const s of sessions || []) {
+      const tr = document.createElement("tr");
+      const accuracy = s.scores?.[0]?.accuracy_pct ?? "—";
+      const reportStatus = s.reports?.[0]?.status ?? "not yet generated";
+      tr.innerHTML = `<td>${nameById[s.participant_id] || "—"}</td><td>${s.assessments?.title || "—"}</td>
+        <td>${s.status}</td><td>${accuracy}${accuracy !== "—" ? "%" : ""}</td><td>${reportStatus}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+})();
+
+document.getElementById("signOutLink").addEventListener("click", async (e) => {
+  e.preventDefault();
+  await supabaseClient.auth.signOut();
+  window.location.href = "index.html";
+});
+</script>
+</body>
+</html>

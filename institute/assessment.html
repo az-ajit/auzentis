@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assessment — Auzentis Institute</title>
+<link rel="stylesheet" href="css/institute.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Auzentis Institute</div>
+  <span class="timer" id="elapsedTimer"></span>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h1 id="assessmentTitle">Loading assessment…</h1>
+    <p class="muted" id="assessmentMeta"></p>
+    <button id="pauseBtn" class="secondary" style="display:none;">Pause</button>
+    <div id="pausedNotice" class="notice" style="display:none;">Paused. Your answers so far are safe — click Resume to continue.</div>
+  </div>
+
+  <div id="questionsContainer"></div>
+
+  <div class="card" id="resultsCard" style="display:none;">
+    <h2>Session complete</h2>
+    <p id="resultsSummary"></p>
+    <table id="domainTable">
+      <thead><tr><th>Domain</th><th>Score</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="notice" style="margin-top:16px;">
+      This is a deterministic accuracy score only. It is not an IQ score, a percentile, or a judgement of ability —
+      see your dashboard report for context once a professional has reviewed it.
+    </p>
+    <a href="dashboard.html" class="btn">Back to dashboard</a>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const assessmentCode = params.get("assessment");
+const participantId = params.get("participant");
+
+let sessionId = null;
+let questions = [];
+let startedAt = null;
+let timerInterval = null;
+const answers = {}; // question_id -> option_text
+
+function startTimer() {
+  startedAt = startedAt || Date.now();
+  timerInterval = setInterval(() => {
+    const secs = Math.floor((Date.now() - startedAt) / 1000);
+    document.getElementById("elapsedTimer").textContent =
+      `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+  }, 1000);
+}
+
+async function init() {
+  if (!assessmentCode || !participantId) {
+    document.getElementById("assessmentTitle").textContent = "Missing assessment or participant.";
+    return;
+  }
+
+  const { data: assessment, error: aErr } = await supabaseClient
+    .from("assessments")
+    .select("id, title, age_band_code, package_tier, assessment_domain_map(domain_id)")
+    .eq("code", assessmentCode)
+    .single();
+
+  if (aErr || !assessment) {
+    document.getElementById("assessmentTitle").textContent = "Assessment not found.";
+    return;
+  }
+
+  document.getElementById("assessmentTitle").textContent = assessment.title;
+  document.getElementById("assessmentMeta").textContent =
+    `Age band ${assessment.age_band_code} · ${assessment.package_tier} package`;
+
+  const domainIds = assessment.assessment_domain_map.map((m) => m.domain_id);
+
+  const { data: qData, error: qErr } = await supabaseClient
+    .from("questions_for_delivery")
+    .select("*")
+    .eq("age_band_code", assessment.age_band_code)
+    .eq("package_tier", assessment.package_tier)
+    .in("domain_id", domainIds);
+
+  if (qErr) {
+    document.getElementById("assessmentTitle").textContent = "Could not load questions.";
+    return;
+  }
+
+  if (!qData || qData.length === 0) {
+    document.getElementById("questionsContainer").innerHTML =
+      `<div class="notice">No reviewed questions are available yet for this assessment. This assessment's
+       content is still in expert review (see QUESTION_BANK_DESIGN.md) — check back after an assessment
+       administrator promotes items to "pilot ready".</div>`;
+    return;
+  }
+
+  questions = qData;
+
+  const { data: session, error: sErr } = await supabaseClient
+    .from("assessment_sessions")
+    .insert({ participant_id: participantId, assessment_id: assessment.id, mode: "online" })
+    .select()
+    .single();
+
+  if (sErr) {
+    document.getElementById("assessmentTitle").textContent = `Could not start session: ${sErr.message}`;
+    return;
+  }
+
+  sessionId = session.id;
+  startTimer();
+  await renderQuestions();
+
+  const pauseBtn = document.getElementById("pauseBtn");
+  pauseBtn.style.display = "inline-block";
+  pauseBtn.addEventListener("click", togglePause);
+}
+
+let isPaused = false;
+
+async function togglePause() {
+  const pauseBtn = document.getElementById("pauseBtn");
+  const notice = document.getElementById("pausedNotice");
+  const questionsContainer = document.getElementById("questionsContainer");
+
+  if (!isPaused) {
+    isPaused = true;
+    clearInterval(timerInterval);
+    await supabaseClient.from("assessment_sessions").update({ status: "paused", paused_at: new Date().toISOString() }).eq("id", sessionId);
+    pauseBtn.textContent = "Resume";
+    notice.style.display = "block";
+    questionsContainer.style.display = "none";
+  } else {
+    isPaused = false;
+    await supabaseClient.from("assessment_sessions").update({ status: "in_progress", resumed_at: new Date().toISOString() }).eq("id", sessionId);
+    startTimer();
+    pauseBtn.textContent = "Pause";
+    notice.style.display = "none";
+    questionsContainer.style.display = "block";
+  }
+}
+
+async function renderQuestions() {
+  const container = document.getElementById("questionsContainer");
+  container.innerHTML = "";
+
+  for (const q of questions) {
+    const { data: options } = await supabaseClient
+      .from("question_options_for_delivery")
+      .select("*")
+      .eq("question_id", q.id)
+      .order("order_index");
+
+    const block = document.createElement("div");
+    block.className = "card question-block";
+    const optionsHtml = (options || [])
+      .map(
+        (o) => `<label class="option-row">
+          <input type="radio" name="q_${q.id}" value="${o.option_text.replace(/"/g, "&quot;")}">
+          ${o.option_text}
+        </label>`
+      )
+      .join("");
+    block.innerHTML = `
+      <p class="muted">${q.instructions || ""}</p>
+      <h2>${q.question_text}</h2>
+      ${optionsHtml}
+    `;
+    container.appendChild(block);
+
+    block.querySelectorAll(`input[name="q_${q.id}"]`).forEach((input) => {
+      input.addEventListener("change", (e) => {
+        answers[q.id] = e.target.value;
+      });
+    });
+  }
+
+  const finishBtn = document.createElement("button");
+  finishBtn.textContent = "Submit assessment";
+  finishBtn.addEventListener("click", submitAssessment);
+  container.appendChild(finishBtn);
+}
+
+async function submitAssessment() {
+  clearInterval(timerInterval);
+  const perQuestionTime = Math.max(1, Math.floor((Date.now() - startedAt) / 1000 / Math.max(1, questions.length)));
+
+  for (const q of questions) {
+    if (!answers[q.id]) continue; // unanswered — left out, counted as unanswered by the scoring function in a future iteration
+    await supabaseClient.from("responses").insert({
+      session_id: sessionId,
+      question_id: q.id,
+      answer_json: { selected: answers[q.id] },
+      time_taken_seconds: perQuestionTime,
+    });
+  }
+
+  let result;
+  try {
+    result = await callEdgeFunction("score_session", { session_id: sessionId });
+  } catch (e) {
+    document.getElementById("questionsContainer").innerHTML = `<div class="notice">Scoring failed: ${e.message}</div>`;
+    return;
+  }
+
+  document.getElementById("questionsContainer").innerHTML = "";
+  document.getElementById("resultsCard").style.display = "block";
+  document.getElementById("resultsSummary").textContent =
+    `Accuracy: ${result.score.accuracy_pct}% (${result.score.correct_count} correct of ${result.score.correct_count + result.score.incorrect_count} scored items). Time taken: ${result.score.time_taken_seconds}s.`;
+
+  const tbody = document.querySelector("#domainTable tbody");
+  for (const d of result.domain_results) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${d.domain_id}</td><td>${d.domain_score}% (${d.correct_count}/${d.total_count})</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

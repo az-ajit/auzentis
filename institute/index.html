@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auzentis Institute — Human Potential Assessment</title>
+<meta name="description" content="AI-assisted human potential assessment, training and development — pilot programme.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/institute.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Auzentis Institute</div>
+  <div class="muted">Human Potential Assessment — Pilot</div>
+</div>
+
+<div class="wrap">
+  <div class="notice">
+    <strong>Pilot programme.</strong> This platform currently covers ages 6–25 across seven foundational domains
+    (Numerical, Verbal, Logical, Memory, Attention, Problem-Solving, Learning Preference). Results are explained in
+    plain language with stated limitations — no score here labels a person's worth or future potential on its own.
+  </div>
+
+  <div class="card">
+    <h1>Sign in</h1>
+    <p class="muted">Participants aged 18+ sign in directly. A parent/guardian signs in to register and manage an
+      under-18 participant.</p>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <div id="authError" class="muted" style="color:var(--red);display:none;"></div>
+    <button id="signInBtn">Sign in</button>
+
+    <div style="margin-top:22px;border-top:1px solid var(--border);padding-top:16px;">
+      <p class="muted" style="margin:0 0 8px;">New here? Choose who this account is for, then create it:</p>
+      <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;">
+        <input type="radio" name="accountFor" value="self" style="width:auto;" checked> I am 18 or older, registering myself
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;margin-top:6px;">
+        <input type="radio" name="accountFor" value="guardian" style="width:auto;"> I am a parent/guardian registering a child
+      </label>
+      <button id="signUpBtn" class="secondary">Create an account</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Roles</h2>
+    <p class="muted">New accounts default to <strong>Parent/Guardian</strong> or <strong>Participant (18+)</strong>.
+      Assessment Administrator and Psychologist accounts are provisioned separately by a Super Administrator — see
+      <a href="admin.html">admin.html</a> once you have that role.</p>
+  </div>
+</div>
+
+<footer>Auzentis Institute · Pilot build · No diagnosis or clinical conclusion is made by this platform.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script>
+async function redirectIfSignedIn() {
+  const { data } = await supabaseClient.auth.getSession();
+  if (data?.session) window.location.href = "dashboard.html";
+}
+redirectIfSignedIn();
+
+function showError(msg) {
+  const el = document.getElementById("authError");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+document.getElementById("signInBtn").addEventListener("click", async () => {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) return showError(error.message);
+  window.location.href = "dashboard.html";
+});
+
+document.getElementById("signUpBtn").addEventListener("click", async () => {
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value;
+  const accountFor = document.querySelector('input[name="accountFor"]:checked').value;
+  if (!email || password.length < 8) return showError("Enter an email and a password of at least 8 characters.");
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) return showError(error.message);
+  if (data.user) {
+    const role = accountFor === "self" ? "participant" : "parent";
+    await supabaseClient.from("profiles").upsert({ id: data.user.id, role });
+  }
+  window.location.href = `register.html?for=${accountFor}`;
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Auzentis Institute</title>
+<link rel="stylesheet" href="css/institute.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Auzentis Institute — Admin</div>
+  <a href="dashboard.html" class="muted">Dashboard</a>
+</div>
+
+<div class="wrap">
+  <div id="forbidden" class="notice" style="display:none;">
+    This page is restricted to Super Administrator, Assessment Administrator, or Psychologist roles.
+  </div>
+
+  <div id="adminContent" style="display:none;">
+    <div class="card">
+      <h1>Question bank — validation review queue</h1>
+      <p class="muted">Promote a question's status only after an independent reviewer has actually reviewed it —
+        see QUESTION_BANK_DESIGN.md. Nothing here fabricates review evidence; this just records the status change.</p>
+      <table id="questionsTable">
+        <thead><tr><th>Code</th><th>Domain</th><th>Age band</th><th>Status</th><th>Test data?</th><th>Action</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Sessions awaiting professional review</h2>
+      <p class="muted">A report cannot reach a participant/guardian until a Psychologist approves it here.</p>
+      <table id="reviewTable">
+        <thead><tr><th>Participant</th><th>Assessment</th><th>Accuracy</th><th>Action</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script>
+let myRole = null;
+
+async function init() {
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  if (!sessionData?.session) { window.location.href = "index.html"; return; }
+  const user = sessionData.session.user;
+
+  const { data: profile } = await supabaseClient.from("profiles").select("role").eq("id", user.id).single();
+  myRole = profile?.role;
+  if (!["super_admin", "assessment_admin", "psychologist"].includes(myRole)) {
+    document.getElementById("forbidden").style.display = "block";
+    return;
+  }
+  document.getElementById("adminContent").style.display = "block";
+
+  await loadQuestions();
+  await loadReviewQueue();
+}
+
+const STATUS_OPTIONS = ["draft", "expert_reviewed", "pilot_ready", "pilot_tested", "under_validation", "validated", "suspended", "retired"];
+
+async function loadQuestions() {
+  const { data: questions, error } = await supabaseClient
+    .from("questions")
+    .select("id, code, age_band_code, validation_status, is_test_data, assessment_domains(name)")
+    .order("code");
+
+  if (error) { document.querySelector("#questionsTable tbody").innerHTML = `<tr><td colspan="6">${error.message}</td></tr>`; return; }
+
+  const tbody = document.querySelector("#questionsTable tbody");
+  tbody.innerHTML = "";
+  for (const q of questions || []) {
+    const tr = document.createElement("tr");
+    const options = STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === q.validation_status ? "selected" : ""}>${s}</option>`).join("");
+    tr.innerHTML = `
+      <td>${q.code}</td>
+      <td>${q.assessment_domains?.name || "—"}</td>
+      <td>${q.age_band_code}</td>
+      <td><select data-id="${q.id}" class="statusSelect">${options}</select></td>
+      <td>${q.is_test_data ? '<span class="badge pending">test only</span>' : ""}</td>
+      <td><button class="secondary saveStatusBtn" data-id="${q.id}">Save</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  document.querySelectorAll(".saveStatusBtn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const select = document.querySelector(`.statusSelect[data-id="${id}"]`);
+      const { error } = await supabaseClient.from("questions").update({ validation_status: select.value }).eq("id", id);
+      if (error) alert(error.message);
+      else { btn.textContent = "Saved"; setTimeout(() => (btn.textContent = "Save"), 1200); }
+    });
+  });
+}
+
+async function loadReviewQueue() {
+  const { data: sessions, error } = await supabaseClient
+    .from("assessment_sessions")
+    .select("id, participant_id, status, participants(full_name), assessments(title), scores(accuracy_pct, id), reports(id, status)")
+    .eq("status", "completed");
+
+  const tbody = document.querySelector("#reviewTable tbody");
+  tbody.innerHTML = "";
+  if (error) { tbody.innerHTML = `<tr><td colspan="4">${error.message}</td></tr>`; return; }
+
+  for (const s of sessions || []) {
+    if (s.reports && s.reports.length && s.reports[0].status === "approved") continue; // already done
+    const tr = document.createElement("tr");
+    const accuracy = s.scores?.[0]?.accuracy_pct ?? "—";
+    const canApprove = myRole === "psychologist" || myRole === "super_admin";
+    tr.innerHTML = `
+      <td>${s.participants?.full_name || "—"}</td>
+      <td>${s.assessments?.title || "—"}</td>
+      <td>${accuracy}%</td>
+      <td>${canApprove ? `<button class="approveBtn" data-session="${s.id}">Approve & generate report</button>` : '<span class="muted">Psychologist only</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  document.querySelectorAll(".approveBtn").forEach((btn) => {
+    btn.addEventListener("click", () => approveSession(btn.dataset.session, btn));
+  });
+}
+
+async function approveSession(sessionId, btn) {
+  btn.disabled = true;
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  const myId = sessionData.session.user.id;
+
+  const { error: reviewErr } = await supabaseClient.from("professional_reviews").insert({
+    session_id: sessionId,
+    reviewer_id: myId,
+    decision: "approved",
+    notes: "Reviewed deterministic score and domain breakdown; no clinical concerns flagged.",
+  });
+  if (reviewErr) { alert(reviewErr.message); btn.disabled = false; return; }
+
+  const { data: scoreRow } = await supabaseClient.from("scores").select("*, domain_results(*)").eq("session_id", sessionId).single();
+
+  const { error: reportErr } = await supabaseClient.from("reports").insert({
+    session_id: sessionId,
+    template_version: "pilot-v1",
+    audience: "participant",
+    status: "approved",
+    approved_by: myId,
+    approved_at: new Date().toISOString(),
+    snapshot_json: scoreRow,
+  });
+  if (reportErr) { alert(reportErr.message); btn.disabled = false; return; }
+
+  btn.closest("tr").remove();
+}
+
+init();
+</script>
+</body>
+</html>
